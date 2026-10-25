@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs the EZGH Fleets agent from the signed EZGH package repository.
 #
-#   curl -fsSL https://packages.ezghcloud.com/install.sh | sudo sh -s -- --project prj_… [options]
+#   curl -fsSL https://packages.ezghcloud.com/install.sh | sudo sh -s -- --project PROJECT_ID [options]
 #
 # It adds the repository (checking the signing key's fingerprint against the one pinned below),
 # installs the ezgh-fleets-agent package, writes /etc/ezgh-fleets-agent/config.yaml and starts
@@ -15,11 +15,11 @@ CONFIG_DIR=/etc/ezgh-fleets-agent
 
 usage() {
 	cat <<'USAGE'
-usage: install.sh --project PROJECT [--organization ORG]
+usage: install.sh --project PROJECT_ID [--organization ORG_ID]
                   [--api-key-file FILE | --oidc-bot BOT --oidc-token-file FILE] [--dry-run]
 
-  --project          the project nodes register in (prj_… or its ID)
-  --organization     the organization (default: learned from the bot key)
+  --project          the ID (a UUID) of the project nodes register in
+  --organization     the organization's ID (a UUID; default: learned from the bot key)
   --api-key-file     a file holding the bot's API key, copied to /etc/ezgh-fleets-agent/credentials
   --oidc-bot         exchange the workload's OIDC token (--oidc-token-file) for this bot's keys
   (neither)          on an EZGH compute instance, the attached Bot's key from the metadata service
@@ -45,13 +45,14 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
-# Values go into YAML: only plain identifiers and absolute paths.
+# Values go into YAML: only plain identifiers, UUIDs and absolute paths.
 ident() { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9_-]+$'; }
+uuid() { printf '%s' "$1" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'; }
 abspath() { printf '%s' "$1" | grep -Eq '^/[A-Za-z0-9._/-]+$'; }
 
 [ -n "$project" ] || { usage >&2; die "--project is required"; }
-ident "$project" || die "--project: not a project ID or slug"
-[ -z "$organization" ] || ident "$organization" || die "--organization: not an organization ID or slug"
+uuid "$project" || die "--project must be the project's ID (a UUID), not its prj_ name"
+[ -z "$organization" ] || uuid "$organization" || die "--organization must be the organization's ID (a UUID), not its org_ name"
 if [ -n "$key_file" ] && [ -n "$oidc_bot" ]; then die "give --api-key-file or --oidc-bot, not both"; fi
 if [ -n "$oidc_bot" ]; then
 	ident "$oidc_bot" || die "--oidc-bot: not a bot ID or slug"

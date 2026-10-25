@@ -17,14 +17,16 @@ that machine. Work in progress: not released yet.
 On Debian, Ubuntu, RHEL, Rocky, Alma or Fedora, as root:
 
 ```sh
-curl -fsSL https://packages.ezghcloud.com/install.sh | sh -s -- --project prj_… --api-key-file /path/to/key
+curl -fsSL https://packages.ezghcloud.com/install.sh | sh -s -- --project PROJECT_ID --api-key-file /path/to/key
 ```
+
+`PROJECT_ID` (and `ORG_ID`) are IDs, UUIDs, not `prj_`/`org_` names, as the console and docs give them.
 
 It adds the signed apt or yum repository at `packages.ezghcloud.com`, refusing a key whose
 primary fingerprint isn't `7B92 EF92 5D8E BB9D B658 AF65 6E11 06BD 7912 989A`, installs the
 `ezgh-fleets-agent` package, writes the configuration below and starts the service. Leave out
 `--api-key-file` on an EZGH compute instance, or use `--oidc-bot bot_… --oidc-token-file FILE
---organization org_…` for a workload OIDC token; `--dry-run` prints the steps. Tarballs, with a
+--organization ORG_ID` for a workload OIDC token; `--dry-run` prints the steps. Tarballs, with a
 signed `SHA256SUMS`, are under `https://packages.ezghcloud.com/releases/<version>/`, and every
 package has a GitHub build provenance attestation (`gh attestation verify FILE --repo
 ezgamehost/ezgh-fleets-agent`).
@@ -34,8 +36,8 @@ ezgamehost/ezgh-fleets-agent`).
 `/etc/ezgh-fleets-agent/config.yaml`:
 
 ```yaml
-project: prj_…            # required
-organization: org_…       # optional: learned from the bot key
+project: 7a1b2c3d-…         # required: the project's ID (a UUID), not its prj_ name
+organization: 6f0c1a2b-…    # optional (its ID): learned from the bot key
 credentials:
   source: auto            # auto | metadata | file | oidc
   file: /etc/ezgh-fleets-agent/credentials   # mode 0600, one API key

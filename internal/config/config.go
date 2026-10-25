@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -24,8 +25,12 @@ const (
 	SourceOIDC     = "oidc"
 )
 
+// fleets-api takes IDs in its paths, not prj_/org_ names.
+var uuid = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
 type Config struct {
-	// Organization is optional: the agent asks org-api which organization its key belongs to.
+	// Organization (optional: the agent asks org-api which one its key belongs to) and Project
+	// are IDs (UUIDs).
 	Organization string      `yaml:"organization"`
 	Project      string      `yaml:"project"`
 	Credentials  Credentials `yaml:"credentials"`
@@ -70,6 +75,12 @@ func Load(path string) (*Config, error) {
 func (c *Config) check() error {
 	if c.Project == "" {
 		return errors.New("project is required")
+	}
+	if !uuid.MatchString(c.Project) {
+		return errors.New("project must be the project's ID (a UUID), not its prj_ name")
+	}
+	if c.Organization != "" && !uuid.MatchString(c.Organization) {
+		return errors.New("organization must be the organization's ID (a UUID), not its org_ name")
 	}
 	def := func(v *string, d string) {
 		if *v == "" {

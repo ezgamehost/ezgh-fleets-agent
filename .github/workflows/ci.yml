@@ -64,7 +64,12 @@ jobs:
         with:
           go-version-file: go.mod
       - run: shellcheck install.sh scripts/*.sh packaging/*.sh
-      - run: sh install.sh --project prj_test --api-key-file /nonexistent --dry-run
+      - name: install.sh dry run
+        run: |
+          sh install.sh --project 7a1b2c3d-0000-4000-8000-000000000003 --api-key-file /nonexistent --dry-run
+          # The config takes IDs, not names: a prj_ name is refused before anything happens.
+          if sh install.sh --project prj_abc --dry-run 2>err; then echo "a prj_ name was accepted"; exit 1; fi
+          grep -q "a UUID" err
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
@@ -122,25 +127,25 @@ jobs:
               "$1" sh -euxc "$4"
           }
           check='echo bot_key >/tmp/key
-            sh /repo/install.sh --project prj_test --api-key-file /tmp/key
+            sh /repo/install.sh --project 7a1b2c3d-0000-4000-8000-000000000003 --api-key-file /tmp/key
             ezgh-fleets-agent version
             test "$(stat -c %a /etc/ezgh-fleets-agent/credentials)" = 600
-            grep -qx "project: prj_test" /etc/ezgh-fleets-agent/config.yaml
+            grep -qx "project: 7a1b2c3d-0000-4000-8000-000000000003" /etc/ezgh-fleets-agent/config.yaml
             # Again, with the key already in place.
-            sh /repo/install.sh --project prj_test --api-key-file /etc/ezgh-fleets-agent/credentials
+            sh /repo/install.sh --project 7a1b2c3d-0000-4000-8000-000000000003 --api-key-file /etc/ezgh-fleets-agent/credentials
             test "$(cat /etc/ezgh-fleets-agent/credentials)" = bot_key
             test "$(stat -c %a:%U /etc/ezgh-fleets-agent/credentials)" = 600:root'
           ubuntu='apt-get update -q && apt-get install -y -q curl'
           other_id=$(printf '%s' "$OTHER_FPR" | tail -c 8 | tr A-F a-f) # rpm names keys by it
           # A key file without the pinned key is refused before anything is installed.
-          if run ubuntu:24.04 8000 0000000000000000000000000000000000000000 "$ubuntu && sh /repo/install.sh --project prj_test"; then
+          if run ubuntu:24.04 8000 0000000000000000000000000000000000000000 "$ubuntu && sh /repo/install.sh --project 7a1b2c3d-0000-4000-8000-000000000003"; then
             echo "installed from a repository with the wrong key"; exit 1
           fi
           # The pinned key is trusted alone: metadata signed by the other key in the file fails.
-          if run ubuntu:24.04 8001 "$PRIMARY_FPR" "$ubuntu && sh /repo/install.sh --project prj_test"; then
+          if run ubuntu:24.04 8001 "$PRIMARY_FPR" "$ubuntu && sh /repo/install.sh --project 7a1b2c3d-0000-4000-8000-000000000003"; then
             echo "apt trusted the other key"; exit 1
           fi
-          if run almalinux:9 8001 "$PRIMARY_FPR" "sh /repo/install.sh --project prj_test"; then
+          if run almalinux:9 8001 "$PRIMARY_FPR" "sh /repo/install.sh --project 7a1b2c3d-0000-4000-8000-000000000003"; then
             echo "dnf trusted the other key"; exit 1
           fi
           run ubuntu:24.04 8000 "$PRIMARY_FPR" "$ubuntu && $check

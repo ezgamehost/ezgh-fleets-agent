@@ -15,7 +15,7 @@ func TestVersionAndStatus(t *testing.T) {
 	}
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(cfg, []byte("project: prj_p\nstateDir: "+filepath.Join(dir, "state")+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(cfg, []byte("project: 7a1b2c3d-0000-4000-8000-000000000003\nstateDir: "+filepath.Join(dir, "state")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out.Reset()
