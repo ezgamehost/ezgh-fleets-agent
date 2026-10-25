@@ -83,7 +83,7 @@ func TestEzghUserAndNamed(t *testing.T) {
 	}
 }
 
-// Only an openSession sets ezgh-user's sudo (PD10): a command run as ezgh-user leaves it be.
+// Only an openSession sets ezgh-user's sudo: a command run as ezgh-user leaves it be.
 func TestInvocationLeavesSudoers(t *testing.T) {
 	m, _ := newFake(t)
 	ctx := context.Background()

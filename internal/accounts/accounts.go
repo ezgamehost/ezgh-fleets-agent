@@ -45,7 +45,7 @@ func (m *Manager) Acquire(ctx context.Context, in protocol.Instruction) (string,
 	case in.OSUser == nil:
 		return "", ErrNotFound
 	case *in.OSUser == EzghUser:
-		// Only an openSession sets sudo (PD10): a command run as ezgh-user leaves it as it is.
+		// Only an openSession sets sudo: a command run as ezgh-user leaves it as it is.
 		if err := m.ensureEzghUser(ctx, in.Type == protocol.TypeOpenSession, in.EzghUserSudo); err != nil {
 			return "", err
 		}

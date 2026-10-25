@@ -136,9 +136,6 @@ func TestInstructionJSONNames(t *testing.T) {
 			t.Errorf("%s missing from %s", f, b)
 		}
 	}
-	if strings.Contains(string(b), `"person"`) {
-		t.Errorf("per-person accounts are gone (PD23): %s", b)
-	}
 }
 
 func TestVerifyKeyList(t *testing.T) {

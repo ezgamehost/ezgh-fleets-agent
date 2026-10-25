@@ -204,7 +204,7 @@ type session struct {
 	ended    bool
 }
 
-// resume replaces the data connection (PD8): the current one, attached or still in its
+// resume replaces the data connection: the current one, attached or still in its
 // handshake, is closed, even if it looks alive, and a new one is dialed at once.
 func (s *session) resume() {
 	s.mu.Lock()

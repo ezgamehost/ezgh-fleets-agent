@@ -403,7 +403,7 @@ func (f *fixture) waiters(n int) {
 	}
 }
 
-// PD8: a resumeSession replaces the data connection, even one that still looks alive (a
+// A resumeSession replaces the data connection, even one that still looks alive (a
 // half-open old home), rather than only waking a redial loop that isn't waiting.
 func TestResumeReplacesConnection(t *testing.T) {
 	f := newFixture(t)
