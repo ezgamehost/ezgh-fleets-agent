@@ -262,6 +262,8 @@ func TestResumeNoLossNoDuplicate(t *testing.T) {
 	var c client
 	f.accept(&c)
 	const n = 20000
+	// No echo: input typed during the output would otherwise land mid-line in it.
+	c.send("stty -echo\n")
 	c.send(fmt.Sprintf("i=0; while [ $i -lt %d ]; do echo line$i; i=$((i+1)); done\n", n))
 	c.readUntil(func() bool { return c.recv > 30<<10 })
 
