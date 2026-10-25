@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -36,6 +37,7 @@ const (
 	readChunk       = 32 << 10
 	inputQueue      = 256 // frames received but not yet written to the PTY
 	gapExitCode     = 255
+	resumeWait      = 30 * time.Second // for the peer's resume on a new data connection
 )
 
 // End reasons reported in SessionEnded.
@@ -125,7 +127,7 @@ func (m *Manager) Resume(in protocol.Instruction) {
 	s := m.sessions[in.ID]
 	m.mu.Unlock()
 	if s != nil {
-		s.redialNow()
+		s.resume()
 	}
 }
 
@@ -158,18 +160,27 @@ type session struct {
 	cmd      *exec.Cmd
 	release  func()
 	out      protocol.Outbox
-	written  uint64 // output bytes put in out
-	acked    uint64 // output bytes the peer has
-	inRecv   uint64 // input bytes received
-	inDone   uint64 // input bytes written to the PTY
-	inAcked  uint64 // input offset last acked to the peer
+	written  uint64          // output bytes put in out
+	acked    uint64          // output bytes the peer has
+	inRecv   uint64          // input bytes received
+	inDone   uint64          // input bytes written to the PTY
+	inAcked  uint64          // input offset last acked to the peer
+	live     *websocket.Conn // the dial loop's connection, attached or not
 	exited   bool
 	drained  bool // the PTY has no more output
 	exitCode int
 	ended    bool
 }
 
-func (s *session) redialNow() {
+// resume replaces the data connection (PD8): the current one, attached or still in its
+// handshake, is closed, even if it looks alive, and a new one is dialed at once.
+func (s *session) resume() {
+	s.mu.Lock()
+	live := s.live
+	s.mu.Unlock()
+	if live != nil {
+		live.CloseNow()
+	}
 	select {
 	case s.kick <- struct{}{}:
 	default:
@@ -177,9 +188,12 @@ func (s *session) redialNow() {
 }
 
 // dialLoop keeps a data connection while the session lives: at once after a drop or a
-// resumeSession, then backing off until the session ends.
+// resumeSession, backing off after a refused dial or a connection that never attached.
 func (s *session) dialLoop() {
 	wait := time.Duration(0)
+	backoff := func(retryAfter time.Duration) {
+		wait = max(min(max(2*wait, time.Second), redialMax), retryAfter)
+	}
 	for {
 		if wait > 0 {
 			select {
@@ -192,18 +206,31 @@ func (s *session) dialLoop() {
 		if s.ctx.Err() != nil {
 			return
 		}
-		ws, err := s.dial()
+		ws, retryAfter, err := s.dial()
 		if err != nil {
 			s.m.Log.Warn("session data connection failed", "session", s.in.ID, "err", err)
-			wait = min(max(2*wait, time.Second), redialMax)
+			backoff(retryAfter)
 			continue
 		}
-		wait = 0
-		s.serve(ws)
+		s.mu.Lock()
+		s.live = ws
+		s.mu.Unlock()
+		attached := s.serve(ws)
+		s.mu.Lock()
+		if s.live == ws {
+			s.live = nil
+		}
+		s.mu.Unlock()
 		if s.ctx.Err() != nil {
 			return
 		}
-		// Dropped: try again at once, then wait for a kick or the backoff.
+		if !attached {
+			s.m.Log.Warn("session data connection ended before it attached", "session", s.in.ID)
+			backoff(0)
+			continue
+		}
+		// Dropped after working: try again at once, then wait for a kick or the backoff.
+		wait = 0
 		select {
 		case <-s.kick:
 		default:
@@ -211,35 +238,44 @@ func (s *session) dialLoop() {
 	}
 }
 
-func (s *session) dial() (*websocket.Conn, error) {
+func (s *session) dial() (*websocket.Conn, time.Duration, error) {
 	key, err := s.m.Creds.Key(s.ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	u := strings.TrimRight(s.m.GatewayURL, "/") + "/agent/v1/sessions/" + s.in.ID
 	ws, resp, err := conn.Dial(s.ctx, s.m.HTTP, u, key, s.m.NodeSlug, s.m.Version, s.m.Clock.Now(), s.m.PrivateKey,
 		func(nonce string) []byte { return protocol.DataMessage(s.m.NodeID, s.in.ID, nonce) })
-	if resp != nil && resp.StatusCode == http.StatusUnauthorized {
-		s.m.Creds.Invalidate(key)
+	var retryAfter time.Duration
+	if resp != nil {
+		if resp.StatusCode == http.StatusUnauthorized {
+			s.m.Creds.Invalidate(key)
+		}
+		if n, perr := strconv.Atoi(resp.Header.Get("Retry-After")); perr == nil && n > 0 {
+			retryAfter = time.Duration(n) * time.Second
+		}
 	}
-	return ws, err
+	return ws, retryAfter, err
 }
 
-// serve runs one data connection until it drops.
-func (s *session) serve(ws *websocket.Conn) {
+// serve runs one data connection until it drops. It says whether the connection attached.
+func (s *session) serve(ws *websocket.Conn) bool {
 	defer ws.CloseNow()
 	s.mu.Lock()
 	recv := s.inRecv
 	s.mu.Unlock()
 	if s.write(ws, protocol.Resume{T: protocol.TypeResume, Offset: recv}) != nil {
-		return
+		return false
 	}
 	var r protocol.Resume
-	if err := wsjson.Read(s.ctx, ws, &r); err != nil || r.T != protocol.TypeResume {
-		return
+	rctx, cancel := context.WithTimeout(s.ctx, resumeWait)
+	err := wsjson.Read(rctx, ws, &r)
+	cancel()
+	if err != nil || r.T != protocol.TypeResume {
+		return false
 	}
 	if !s.attach(ws, r.Offset) {
-		return
+		return true // ended, not a dial to retry
 	}
 	for {
 		typ, b, err := ws.Read(s.ctx)
@@ -248,7 +284,7 @@ func (s *session) serve(ws *websocket.Conn) {
 		}
 		if typ == websocket.MessageBinary {
 			if !s.receive(b) {
-				return
+				return true
 			}
 			continue
 		}
@@ -262,6 +298,7 @@ func (s *session) serve(ws *websocket.Conn) {
 		}
 	}
 	s.mu.Unlock()
+	return true
 }
 
 // attach makes ws the session's connection and resends output from the peer's offset.

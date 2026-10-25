@@ -54,6 +54,7 @@ type fixture struct {
 	conns    chan *websocket.Conn
 	mu       sync.Mutex
 	refuse   bool
+	retry    string // Retry-After on a refusal
 	ended    chan protocol.SessionEnded
 	nodePub  ed25519.PublicKey
 	released atomic.Int32
@@ -65,9 +66,12 @@ func newFixture(t *testing.T) *fixture {
 	f := &fixture{t: t, clock: clockwork.NewFakeClock(), conns: make(chan *websocket.Conn, 4), ended: make(chan protocol.SessionEnded, 4), nodePub: pub}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
-		refuse := f.refuse
+		refuse, retry := f.refuse, f.retry
 		f.mu.Unlock()
 		if refuse || r.URL.Path != "/agent/v1/sessions/"+sessionID || r.Header.Get("Authorization") != "Bearer ezgh_key" {
+			if retry != "" {
+				w.Header().Set("Retry-After", retry)
+			}
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}
@@ -372,4 +376,80 @@ func TestEndedSessionNotReopened(t *testing.T) {
 	if !open() {
 		t.Fatal("the ended ID was never forgotten")
 	}
+}
+
+func (f *fixture) noDial(within time.Duration) {
+	f.t.Helper()
+	select {
+	case <-f.conns:
+		f.t.Fatal("redialed without waiting")
+	case <-time.After(within):
+	}
+}
+
+func (f *fixture) waiters(n int) {
+	f.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := f.clock.BlockUntilContext(ctx, n); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+// PD8: a resumeSession replaces the data connection, even one that still looks alive (a
+// half-open old home), rather than only waking a redial loop that isn't waiting.
+func TestResumeReplacesConnection(t *testing.T) {
+	f := newFixture(t)
+	f.open()
+	var c1 client
+	f.accept(&c1)
+	f.m.Resume(protocol.Instruction{Type: protocol.TypeResumeSession, NodeID: nodeID, ID: sessionID})
+	var c2 client
+	f.accept(&c2)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for {
+		if _, _, err := c1.ws.Read(ctx); err != nil {
+			if ctx.Err() != nil {
+				t.Fatal("the old data connection was kept open")
+			}
+			break
+		}
+	}
+	c2.send("echo ok$((1+1))\n")
+	c2.waitFor("ok2")
+}
+
+// A data connection that ends before the resume handshake counts as a failed dial: the agent
+// backs off rather than redialing at once.
+func TestUnattachedConnectionBacksOff(t *testing.T) {
+	f := newFixture(t)
+	f.open()
+	ws := <-f.conns
+	ws.CloseNow() // no resume
+	f.noDial(200 * time.Millisecond)
+	f.waiters(3) // the ack ticker, the client-gone timer and the backoff
+	f.clock.Advance(time.Second)
+	var c client
+	f.accept(&c)
+}
+
+// A refused dial waits at least the gateway's Retry-After.
+func TestRefusedDialHonoursRetryAfter(t *testing.T) {
+	f := newFixture(t)
+	f.open()
+	var c client
+	f.accept(&c)
+	f.mu.Lock()
+	f.refuse, f.retry = true, "5"
+	f.mu.Unlock()
+	c.ws.CloseNow() // redialed at once, and refused
+	f.waiters(3)
+	f.mu.Lock()
+	f.refuse, f.retry = false, ""
+	f.mu.Unlock()
+	f.clock.Advance(5*time.Second - time.Millisecond)
+	f.noDial(200 * time.Millisecond)
+	f.clock.Advance(time.Millisecond)
+	f.accept(&c)
 }
