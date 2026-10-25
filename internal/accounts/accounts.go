@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/state"
 	"github.com/ezgamehost/ezgh-fleets-agent/protocol"
 )
 
@@ -27,6 +28,9 @@ const (
 	// markerPref starts a per-person account's GECOS: ezgh/<principal type>/<principal ID>.
 	// Not colons: they separate /etc/passwd's fields.
 	markerPref = "ezgh/"
+	// CreatedFile, in the state directory, names the per-person accounts the agent created
+	// (name → marker). A marker counts only on those: chfn can set anyone's GECOS.
+	CreatedFile = "accounts.json"
 )
 
 var (
@@ -42,9 +46,12 @@ type Manager struct {
 	// Exec runs a host command; default os/exec, with its output in the error.
 	Exec func(ctx context.Context, name string, args ...string) error
 	Log  *slog.Logger
+	// State keeps CreatedFile.
+	State *state.Dir
 
-	mu   sync.Mutex // around every account change
-	open map[string]int
+	mu      sync.Mutex // around every account change
+	open    map[string]int
+	created map[string]string
 }
 
 // Acquire readies the instruction's account and returns its name. release must be called
@@ -55,7 +62,8 @@ func (m *Manager) Acquire(ctx context.Context, in protocol.Instruction) (name st
 	noop := func() {}
 	switch {
 	case in.OSUser != nil && *in.OSUser == EzghUser:
-		if err := m.ensureEzghUser(ctx, in.EzghUserSudo); err != nil {
+		// Only an openSession sets sudo (PD10): a command run as ezgh-user leaves it as it is.
+		if err := m.ensureEzghUser(ctx, in.Type == protocol.TypeOpenSession, in.EzghUserSudo); err != nil {
 			return "", nil, err
 		}
 		return EzghUser, noop, nil
@@ -92,13 +100,17 @@ func (m *Manager) Acquire(ctx context.Context, in protocol.Instruction) (name st
 func (m *Manager) ExpirePersons(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	created, err := m.loadCreated()
+	if err != nil {
+		return err
+	}
 	entries, err := m.entries()
 	if err != nil {
 		return err
 	}
 	var errs []error
 	for _, e := range entries {
-		if strings.HasPrefix(e.gecos, markerPref) && m.open[e.name] == 0 {
+		if _, ours := created[e.name]; ours && m.open[e.name] == 0 {
 			errs = append(errs, m.lock(ctx, e.name))
 		}
 	}
@@ -133,7 +145,11 @@ func (m *Manager) person(ctx context.Context, p protocol.Person) (string, error)
 		return "", fmt.Errorf("person %q:%q: not a usable principal", p.Type, p.ID)
 	}
 	marker := markerPref + p.Type + "/" + p.ID
-	if e, ok, err := m.lookup(func(e entry) bool { return e.gecos == marker }); err != nil || ok {
+	created, err := m.loadCreated()
+	if err != nil {
+		return "", err
+	}
+	if e, ok, err := m.lookup(func(e entry) bool { return e.gecos == marker && created[e.name] == marker }); err != nil || ok {
 		return e.name, err
 	}
 	if len(p.BaseName) > 24 || !OSUserPattern.MatchString(p.BaseName) {
@@ -153,13 +169,34 @@ func (m *Manager) person(ctx context.Context, p protocol.Person) (string, error)
 			return "", fmt.Errorf("account names %q and %q are both taken", p.BaseName, candidate)
 		}
 	}
+	// Recorded first: an account created but not recorded would never be expired at start.
+	created[name] = marker
+	if err := m.State.Write(CreatedFile, created); err != nil {
+		delete(created, name)
+		return "", fmt.Errorf("recording the account: %w", err)
+	}
 	if err := m.exec(ctx, "useradd", "--create-home", "--shell", defaultShell(), "--comment", marker, name); err != nil {
 		return "", err
 	}
 	return name, m.exec(ctx, "chage", "-E", "0", name)
 }
 
-func (m *Manager) ensureEzghUser(ctx context.Context, sudo bool) error {
+func (m *Manager) loadCreated() (map[string]string, error) {
+	if m.created != nil {
+		return m.created, nil
+	}
+	if m.State == nil {
+		return nil, errors.New("accounts: no state directory")
+	}
+	created := map[string]string{}
+	if err := m.State.Read(CreatedFile, &created); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("reading %s: %w", CreatedFile, err)
+	}
+	m.created = created
+	return created, nil
+}
+
+func (m *Manager) ensureEzghUser(ctx context.Context, setSudo, sudo bool) error {
 	_, ok, err := m.lookup(func(e entry) bool { return e.name == EzghUser })
 	if err != nil {
 		return err
@@ -168,6 +205,9 @@ func (m *Manager) ensureEzghUser(ctx context.Context, sudo bool) error {
 		if err := m.exec(ctx, "useradd", "--create-home", "--shell", defaultShell(), "--comment", "EZGH Fleets", EzghUser); err != nil {
 			return err
 		}
+	}
+	if !setSudo {
+		return nil
 	}
 	dir := m.SudoersDir
 	if dir == "" {

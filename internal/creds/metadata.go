@@ -138,7 +138,7 @@ func (p *Metadata) fetch(ctx context.Context) error {
 			p.key, p.bot, p.expiresAt = c.APIKey, c.Bot, c.ExpiresAt
 			return nil
 		case status == http.StatusUnauthorized && attempt == 0:
-			p.token = "" // the token is gone (migration, hostd restart): get one new one
+			p.token = "" // the token is gone (after a migration or a host restart): get a new one
 		case status == http.StatusNotFound && errorCode(body) == "no_bot":
 			return ErrNoBot
 		default:

@@ -124,6 +124,11 @@ func agent(path string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// Before anything else, registration included: a crash mid-session left accounts usable.
+	accts := &accounts.Manager{State: st, Log: log}
+	if err := accts.ExpirePersons(ctx); err != nil {
+		log.Error("couldn't expire per-person accounts at start", "err", err)
+	}
 	src := creds.New(cfg)
 	r := &register.Registrar{Config: cfg, State: st, Creds: src, Facts: register.LocalFacts(version), Log: log}
 	id, err := r.Ensure(ctx)
@@ -137,10 +142,6 @@ func agent(path string) error {
 	chk, err := instr.New(id.Node.ID, st, log)
 	if err != nil {
 		return err
-	}
-	accts := &accounts.Manager{Log: log}
-	if err := accts.ExpirePersons(ctx); err != nil {
-		log.Error("couldn't expire per-person accounts at start", "err", err)
 	}
 	spawn := func(in protocol.Instruction) (*exec.Cmd, func(), error) {
 		name, release, err := accts.Acquire(ctx, in)

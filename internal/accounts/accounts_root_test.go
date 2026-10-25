@@ -10,12 +10,14 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/state"
 	"github.com/ezgamehost/ezgh-fleets-agent/protocol"
 )
 
@@ -32,7 +34,11 @@ func rootManager(t *testing.T, cleanup ...string) *Manager {
 		}
 		_ = os.Remove("/etc/sudoers.d/" + EzghUser)
 	})
-	return &Manager{Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	st, err := state.Open(filepath.Join(t.TempDir(), "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &Manager{State: st, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 }
 
 func sh(t *testing.T, name string, args ...string) string {
@@ -84,11 +90,11 @@ func TestEzghUserCreated(t *testing.T) {
 func TestEzghUserSudo(t *testing.T) {
 	m := rootManager(t, EzghUser)
 	u := EzghUser
-	if _, _, err := m.Acquire(context.Background(), protocol.Instruction{OSUser: &u, EzghUserSudo: true}); err != nil {
+	if _, _, err := m.Acquire(context.Background(), protocol.Instruction{Type: protocol.TypeOpenSession, OSUser: &u, EzghUserSudo: true}); err != nil {
 		t.Fatal(err)
 	}
 	sh(t, "visudo", "-cf", "/etc/sudoers.d/"+EzghUser)
-	if _, _, err := m.Acquire(context.Background(), protocol.Instruction{OSUser: &u}); err != nil {
+	if _, _, err := m.Acquire(context.Background(), protocol.Instruction{Type: protocol.TypeOpenSession, OSUser: &u}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat("/etc/sudoers.d/" + EzghUser); !os.IsNotExist(err) {
@@ -201,7 +207,7 @@ func TestStartupExpiresPersonAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The agent crashed with the session open: the next agent expires the account at start.
-	next := &Manager{Log: m.Log}
+	next := &Manager{State: m.State, Log: m.Log}
 	if err := next.ExpirePersons(ctx); err != nil {
 		t.Fatal(err)
 	}
