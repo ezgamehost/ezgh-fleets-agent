@@ -20,7 +20,7 @@ func TestAccountShell(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cmd.Dir != me.HomeDir || cmd.Args[0][0] != '-' || cmd.SysProcAttr != nil {
+	if cmd.Dir != me.HomeDir || cmd.Args[0][0] != '-' || cmd.SysProcAttr.Credential != nil {
 		t.Fatalf("cmd %+v", cmd)
 	}
 }

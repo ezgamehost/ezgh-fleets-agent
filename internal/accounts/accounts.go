@@ -153,7 +153,7 @@ func (m *Manager) person(ctx context.Context, p protocol.Person) (string, error)
 			return "", fmt.Errorf("account names %q and %q are both taken", p.BaseName, candidate)
 		}
 	}
-	if err := m.exec(ctx, "useradd", "--create-home", "--shell", loginShell(), "--comment", marker, name); err != nil {
+	if err := m.exec(ctx, "useradd", "--create-home", "--shell", defaultShell(), "--comment", marker, name); err != nil {
 		return "", err
 	}
 	return name, m.exec(ctx, "chage", "-E", "0", name)
@@ -165,7 +165,7 @@ func (m *Manager) ensureEzghUser(ctx context.Context, sudo bool) error {
 		return err
 	}
 	if !ok {
-		if err := m.exec(ctx, "useradd", "--create-home", "--shell", loginShell(), "--comment", "EZGH Fleets", EzghUser); err != nil {
+		if err := m.exec(ctx, "useradd", "--create-home", "--shell", defaultShell(), "--comment", "EZGH Fleets", EzghUser); err != nil {
 			return err
 		}
 	}
@@ -206,7 +206,8 @@ func suffix(id string) string {
 	return hex.EncodeToString(sum[:])[:4]
 }
 
-func loginShell() string {
+// defaultShell is the shell new accounts get.
+func defaultShell() string {
 	if _, err := os.Stat("/bin/bash"); err == nil {
 		return "/bin/bash"
 	}

@@ -71,7 +71,10 @@ type Conn struct {
 	HTTP       *http.Client
 	Log        *slog.Logger
 	OnStatus   func(Status)
-	Rand       func() float64 // [0,1), for jitter
+	// OnConnected runs after each welcome, in its own goroutine: the time to resend reports
+	// that couldn't be sent while disconnected.
+	OnConnected func()
+	Rand        func() float64 // [0,1), for jitter
 
 	mu     sync.Mutex
 	ws     *websocket.Conn
@@ -186,6 +189,9 @@ func (c *Conn) connect(ctx context.Context) (welcomed bool, retryAfter time.Dura
 	}()
 	c.setStatus(func(s *Status) { *s = Status{Connected: true, Since: now, ClockSkew: skew, Warning: warning} })
 	c.Log.Info("connected to the gateway", "node", c.NodeSlug)
+	if c.OnConnected != nil {
+		go c.OnConnected()
+	}
 
 	lctx, stop := context.WithCancel(ctx)
 	var wg sync.WaitGroup

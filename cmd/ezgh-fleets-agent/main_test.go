@@ -10,7 +10,7 @@ import (
 
 func TestVersionAndStatus(t *testing.T) {
 	var out bytes.Buffer
-	if err := run([]string{"version"}, &out); err != nil || !strings.HasPrefix(out.String(), "ezgh-fleets-agent ") {
+	if err := cli([]string{"version"}, &out); err != nil || !strings.HasPrefix(out.String(), "ezgh-fleets-agent ") {
 		t.Fatalf("version: %q, %v", out.String(), err)
 	}
 	dir := t.TempDir()
@@ -19,10 +19,10 @@ func TestVersionAndStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	out.Reset()
-	if err := run([]string{"status", "--config", cfg}, &out); err != nil || !strings.Contains(out.String(), "not registered") {
+	if err := cli([]string{"status", "--config", cfg}, &out); err != nil || !strings.Contains(out.String(), "not registered") {
 		t.Fatalf("status: %q, %v", out.String(), err)
 	}
-	if err := run([]string{"bogus"}, &out); err == nil {
+	if err := cli([]string{"bogus"}, &out); err == nil {
 		t.Fatal("an unknown command ran")
 	}
 }

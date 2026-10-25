@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/ezgamehost/ezgh-fleets-agent/internal/accounts"
@@ -19,6 +20,7 @@ import (
 	"github.com/ezgamehost/ezgh-fleets-agent/internal/creds"
 	"github.com/ezgamehost/ezgh-fleets-agent/internal/instr"
 	"github.com/ezgamehost/ezgh-fleets-agent/internal/register"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/run"
 	"github.com/ezgamehost/ezgh-fleets-agent/internal/session"
 	"github.com/ezgamehost/ezgh-fleets-agent/internal/state"
 	"github.com/ezgamehost/ezgh-fleets-agent/protocol"
@@ -45,13 +47,13 @@ func main() {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
-	if err := run(os.Args[1:], os.Stdout); err != nil {
+	if err := cli(os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "ezgh-fleets-agent:", err)
 		os.Exit(1)
 	}
 }
 
-func run(args []string, stdout io.Writer) error {
+func cli(args []string, stdout io.Writer) error {
 	if len(args) == 0 {
 		return errUsage
 	}
@@ -153,6 +155,12 @@ func agent(path string) error {
 		return cmd, release, nil
 	}
 	var c *conn.Conn
+	invDir, err := state.Open(filepath.Join(cfg.StateDir, "invocations"))
+	if err != nil {
+		return err
+	}
+	runner := &run.Runner{Dir: invDir, Acquire: accts.Acquire, Log: log,
+		Report: func(v any) error { return c.Send(ctx, v) }}
 	sessions := &session.Manager{
 		GatewayURL: cfg.GatewayURL, NodeID: id.Node.ID, NodeSlug: id.Node.Slug, PrivateKey: id.PrivateKey(),
 		Version: version, Creds: src, Spawn: spawn, Log: log,
@@ -165,12 +173,16 @@ func agent(path string) error {
 	defer sessions.Shutdown()
 	c = &conn.Conn{
 		GatewayURL: cfg.GatewayURL, NodeID: id.Node.ID, NodeSlug: id.Node.Slug, PrivateKey: id.PrivateKey(),
-		Version: version, Creds: src, Checker: chk, Handler: &dispatch{log: log, sessions: sessions}, Log: log,
+		Version: version, Creds: src, Checker: chk, Handler: &dispatch{log: log, sessions: sessions, runner: runner}, Log: log,
+		OnConnected: runner.Resend,
 		OnStatus: func(s conn.Status) {
 			if err := st.Write(statusFile, s); err != nil {
 				log.Warn("couldn't write the status file", "err", err)
 			}
 		},
+	}
+	if err := runner.Recover(); err != nil {
+		return err
 	}
 	return c.Run(ctx)
 }
@@ -179,6 +191,7 @@ func agent(path string) error {
 type dispatch struct {
 	log      *slog.Logger
 	sessions *session.Manager
+	runner   *run.Runner
 }
 
 func (d *dispatch) Instruction(_ context.Context, in protocol.Instruction) {
@@ -187,9 +200,9 @@ func (d *dispatch) Instruction(_ context.Context, in protocol.Instruction) {
 		d.sessions.Open(in)
 	case protocol.TypeResumeSession:
 		d.sessions.Resume(in)
-	default:
-		d.log.Warn("instruction not supported by this agent yet", "type", in.Type, "id", in.ID)
+	case protocol.TypeRunInvocation:
+		d.runner.Run(in)
 	}
 }
-func (d *dispatch) Cancel(string)                   {}
+func (d *dispatch) Cancel(runID string)             { d.runner.Cancel(runID) }
 func (d *dispatch) SessionClosed(id, reason string) { d.sessions.Close(id, reason) }
