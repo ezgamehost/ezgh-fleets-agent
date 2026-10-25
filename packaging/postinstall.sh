@@ -21,8 +21,16 @@ if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
 	systemctl enable ezgh-fleets-agent.service || true
 	# Started by install.sh once it's configured; an upgrade restarts a running agent.
 	if inside_agent; then
-		# Later, from outside the agent's cgroup, once the package manager has finished.
-		systemd-run --quiet --collect --on-active=30 systemctl try-restart ezgh-fleets-agent.service ||
+		# Later, from outside the agent's cgroup, once no package manager runs (the one
+		# upgrading the agent, or one it started): waiting at most 30 minutes.
+		# shellcheck disable=SC2016 # expanded by the transient unit's shell
+		wait='i=0
+while [ $i -lt 360 ] && pgrep -x "apt|apt-get|dpkg|dnf|yum|rpm|unattended-upgr" >/dev/null; do
+	sleep 5
+	i=$((i + 1))
+done
+systemctl try-restart ezgh-fleets-agent.service'
+		systemd-run --quiet --collect --on-active=30 /bin/sh -c "$wait" ||
 			echo "ezgh-fleets-agent: restart the service to finish the upgrade" >&2
 	else
 		systemctl try-restart ezgh-fleets-agent.service || true
