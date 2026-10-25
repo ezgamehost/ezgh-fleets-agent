@@ -165,6 +165,7 @@ esac
 run install -d -m 0700 "$CONFIG_DIR"
 if [ -n "$key_file" ]; then
 	# The key may already be in place (--api-key-file /etc/ezgh-fleets-agent/credentials).
+	# shellcheck disable=SC3013 # not POSIX, but dash, bash and busybox sh all have -ef
 	if [ ! "$key_file" -ef "$CONFIG_DIR/credentials" ]; then
 		run install -m 0600 "$key_file" "$CONFIG_DIR/credentials"
 	fi
