@@ -12,6 +12,22 @@ that machine. Work in progress: the agent itself isn't released yet.
 - `protocol/devkeys/`: a **development-only** root whose private key is published on purpose.
   It's compiled in, and trusted, only with the `dev` build tag. Release builds never use it.
 
+## Configuration
+
+`/etc/ezgh-systems-agent/config.yaml`:
+
+```yaml
+project: prj_…            # required
+organization: org_…       # optional: learned from the bot key
+credentials:
+  source: auto            # auto | metadata | file | oidc
+  file: /etc/ezgh-systems-agent/credentials   # mode 0600, one API key
+  oidc: { bot: bot_…, tokenFile: /var/run/secrets/ezgh/token }   # needs organization
+```
+
+`auto` uses the instance metadata service on an EZGH compute instance, and the key file
+elsewhere. The agent keeps its node binding in `/var/lib/ezgh-systems-agent` (0700).
+
 ## Development
 
 Go 1.27.1.
