@@ -51,3 +51,63 @@ jobs:
         run: |
           go test -race -c -o "$RUNNER_TEMP/accounts.test" ./internal/accounts
           sudo EZGH_AGENT_ROOT_TESTS=1 "$RUNNER_TEMP/accounts.test" -test.v -test.count=1
+
+  packages:
+    name: Packages
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # goreleaser versions from the tags
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: shellcheck install.sh scripts/*.sh packaging/*.sh
+      - run: sh install.sh --project prj_test --api-key-file /nonexistent --dry-run
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: "v2.18.3"
+          args: check
+      - name: throwaway signing key
+        # Generated here and gone with the runner: it stands in for the packages key.
+        run: |
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          install -d -m 0700 "$GNUPGHOME"
+          gpg --batch --passphrase '' --quick-gen-key 'EZGH CI throwaway <ci@example.invalid>' rsa3072 sign 1d
+          fpr=$(gpg --batch --with-colons --list-keys | awk -F: '$1 == "fpr" { print $10; exit }')
+          gpg --batch --armor --export-secret-keys "$fpr" >"$RUNNER_TEMP/throwaway.key"
+          {
+            echo "GNUPGHOME=$GNUPGHOME"
+            echo "GPG_KEY_ID=$fpr"
+            echo "RPM_SIGNING_KEY_FILE=$RUNNER_TEMP/throwaway.key"
+          } >>"$GITHUB_ENV"
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: "v2.18.3"
+          args: release --snapshot --clean
+      - run: sudo apt-get update -q && sudo apt-get install -y -q apt-utils createrepo-c
+      - run: scripts/repo.sh build dist repo
+      - name: install from the repository
+        run: |
+          python3 -m http.server 8000 --bind 127.0.0.1 --directory repo >/dev/null 2>&1 &
+          run() { # run IMAGE FINGERPRINT SCRIPT
+            docker run --rm --network host -v "$PWD/repo:/repo:ro" \
+              -e EZGH_FLEETS_REPO_URL=http://127.0.0.1:8000 -e EZGH_FLEETS_KEY_FINGERPRINT="$2" \
+              "$1" sh -euxc "$3"
+          }
+          check='echo bot_key >/tmp/key
+            sh /repo/install.sh --project prj_test --api-key-file /tmp/key
+            ezgh-fleets-agent version
+            test "$(stat -c %a /etc/ezgh-fleets-agent/credentials)" = 600
+            grep -qx "project: prj_test" /etc/ezgh-fleets-agent/config.yaml'
+          # A key with another fingerprint is refused before anything is installed.
+          if run ubuntu:24.04 0000000000000000000000000000000000000000 \
+            'apt-get update -q && apt-get install -y -q curl && sh /repo/install.sh --project prj_test'; then
+            echo "installed from a repository with the wrong key"; exit 1
+          fi
+          run ubuntu:24.04 "$GPG_KEY_ID" "apt-get update -q && apt-get install -y -q curl && $check"
+          run almalinux:9 "$GPG_KEY_ID" "$check
+            rpm -K /repo/yum/x86_64/*.rpm | grep -q 'digests signatures OK'"

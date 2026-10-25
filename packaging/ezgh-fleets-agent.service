@@ -1,0 +1,19 @@
+[Unit]
+Description=EZGH Fleets agent
+Documentation=https://docs.ezghcloud.com/fleets/
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/etc/ezgh-fleets-agent/config.yaml
+
+[Service]
+# Root: it creates accounts and starts shells and commands as them. It listens on nothing.
+ExecStart=/usr/bin/ezgh-fleets-agent run
+Restart=always
+RestartSec=5
+# Stopping the agent ends its sessions and commands too (the default control-group kill), so
+# nothing it started outlives it unsupervised; a restarted agent reports such commands
+# failed (agent_restarted).
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

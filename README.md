@@ -2,7 +2,7 @@
 
 The EZGH Fleets agent for Linux. It runs on a machine as root, connects outbound to
 EZGH, and opens shells and runs commands only when EZGH sends it an instruction signed for
-that machine. Work in progress: the agent itself isn't released yet.
+that machine. Work in progress: not released yet.
 
 ## Layout
 
@@ -11,6 +11,23 @@ that machine. Work in progress: the agent itself isn't released yet.
   buffer (`Outbox`). `protocol.Roots` holds the public keys trusted to sign instruction key lists.
 - `protocol/devkeys/`: a **development-only** root whose private key is published on purpose.
   It's compiled in, and trusted, only with the `dev` build tag. Release builds never use it.
+
+## Install
+
+On Debian, Ubuntu, RHEL, Rocky, Alma or Fedora, as root:
+
+```sh
+curl -fsSL https://packages.ezghcloud.com/install.sh | sh -s -- --project prj_… --api-key-file /path/to/key
+```
+
+It adds the signed apt or yum repository at `packages.ezghcloud.com`, refusing a key whose
+primary fingerprint isn't `7B92 EF92 5D8E BB9D B658 AF65 6E11 06BD 7912 989A`, installs the
+`ezgh-fleets-agent` package, writes the configuration below and starts the service. Leave out
+`--api-key-file` on an EZGH compute instance, or use `--oidc-bot bot_… --oidc-token-file FILE
+--organization org_…` for a workload OIDC token; `--dry-run` prints the steps. Tarballs, with a
+signed `SHA256SUMS`, are under `https://packages.ezghcloud.com/releases/<version>/`, and every
+package has a GitHub build provenance attestation (`gh attestation verify FILE --repo
+ezgamehost/ezgh-fleets-agent`).
 
 ## Configuration
 
@@ -37,7 +54,11 @@ gofmt -l .
 go vet ./... && go vet -tags dev ./...
 go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
 go test -race ./... && go test -race -tags dev ./...
+shellcheck install.sh scripts/*.sh packaging/*.sh
+goreleaser release --snapshot --clean   # packages into dist/
 ```
+
+`release.yml` publishes a `v*` tag on main: `scripts/repo.sh` keeps the apt and yum repository.
 
 ## License
 

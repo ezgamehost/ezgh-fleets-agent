@@ -1,0 +1,84 @@
+name: Release
+
+# On a v* tag on main: build the packages, sign them (rpm) and the repository metadata (apt,
+# yum) with the packages subkey, attest their provenance, and publish them to the repository
+# behind packages.ezghcloud.com. Needs the `release` environment's secrets and variables:
+#   PACKAGES_GPG_KEY         armored secret signing subkey (primary stripped)
+#   PACKAGES_GPG_PASSPHRASE  its passphrase
+#   PACKAGES_GPG_KEY_ID      vars: the subkey's fingerprint followed by !
+#   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY; vars R2_ACCOUNT_ID, R2_BUCKET
+on:
+  push:
+    tags: ["v*"]
+
+# One publish at a time: each one adds to what's in the bucket.
+concurrency:
+  group: packages-repository
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: the tag is on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: import the signing key
+        env:
+          PACKAGES_GPG_KEY: ${{ secrets.PACKAGES_GPG_KEY }}
+        run: |
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          install -d -m 0700 "$GNUPGHOME"
+          printf '%s\n' "$PACKAGES_GPG_KEY" >"$RUNNER_TEMP/packages.key"
+          chmod 0600 "$RUNNER_TEMP/packages.key"
+          gpg --batch --import "$RUNNER_TEMP/packages.key"
+          {
+            echo "GNUPGHOME=$GNUPGHOME"
+            echo "RPM_SIGNING_KEY_FILE=$RUNNER_TEMP/packages.key"
+          } >>"$GITHUB_ENV"
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: "v2.18.3"
+          args: release --clean
+        env:
+          NFPM_PASSPHRASE: ${{ secrets.PACKAGES_GPG_PASSPHRASE }}
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.tar.gz
+      - run: sudo apt-get update -q && sudo apt-get install -y -q apt-utils createrepo-c
+      - name: publish
+        env:
+          GPG_KEY_ID: ${{ vars.PACKAGES_GPG_KEY_ID }}
+          GPG_PASSPHRASE: ${{ secrets.PACKAGES_GPG_PASSPHRASE }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+        run: |
+          scripts/repo.sh pull "$RUNNER_TEMP/repo"
+          scripts/repo.sh build dist "$RUNNER_TEMP/repo"
+          scripts/repo.sh push "$RUNNER_TEMP/repo"
+      - if: always()
+        run: rm -rf "$RUNNER_TEMP/packages.key" "$RUNNER_TEMP/gnupg"

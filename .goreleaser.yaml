@@ -1,0 +1,68 @@
+# Agent packages: static Linux binaries for amd64 and arm64, as .deb, .rpm and a tarball.
+# goreleaser only builds (release.disable): release.yml signs, attests and publishes dist/ to
+# the apt/yum repository at packages.ezghcloud.com with scripts/repo.sh.
+# `goreleaser release --snapshot --clean` builds everything into dist/; CI checks this file.
+version: 2
+project_name: ezgh-fleets-agent
+
+builds:
+  - id: agent
+    main: ./cmd/ezgh-fleets-agent
+    binary: ezgh-fleets-agent
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: tarball
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - packaging/ezgh-fleets-agent.service
+
+nfpms:
+  - id: packages
+    package_name: ezgh-fleets-agent
+    file_name_template: "{{ .ConventionalFileName }}"
+    vendor: EZGH Cloud
+    homepage: https://github.com/ezgamehost/ezgh-fleets-agent
+    maintainer: EZGH Cloud <noreply@ezghcloud.com>
+    description: EZGH Fleets agent, for shell sessions and commands from EZGH without SSH.
+    license: Apache-2.0
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    contents:
+      - src: packaging/ezgh-fleets-agent.service
+        dst: /usr/lib/systemd/system/ezgh-fleets-agent.service
+      - dst: /etc/ezgh-fleets-agent
+        type: dir
+        file_info: { mode: 0755 }
+      - dst: /var/lib/ezgh-fleets-agent
+        type: dir
+        file_info: { mode: 0700 }
+    scripts:
+      postinstall: packaging/postinstall.sh
+      preremove: packaging/preremove.sh
+    rpm:
+      # dnf checks package signatures (gpgcheck=1); apt checks the signed repository instead.
+      signature:
+        key_file: '{{ index .Env "RPM_SIGNING_KEY_FILE" }}'
+
+checksum:
+  name_template: SHA256SUMS
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  disable: true
+
+release:
+  disable: true
