@@ -1,15 +1,17 @@
 #!/bin/sh
-# The apt and yum repository behind packages.ezghcloud.com, kept in an R2 bucket.
+# The apt and yum repository behind get.ezghcloud.com/fleets: the fleets/ prefix of the R2
+# bucket ezghcloud-get, which serves other products at its root. Nothing here reads or writes
+# outside that prefix (s3 refuses), and nothing deletes.
 #
 #   scripts/repo.sh pubkey DIR        write the public key (ezgh-packages.gpg and .asc) into DIR,
 #                                     for the packages to ship (goreleaser reads build/)
 #   scripts/repo.sh build DIST REPO   add DIST's packages to the repository tree REPO, regenerate
 #                                     the apt and yum metadata and sign it with $GPG_KEY_ID
-#   scripts/repo.sh pull REPO         download the bucket into REPO (to add to what's published)
-#   scripts/repo.sh push REPO         upload REPO to the bucket: packages first, then the
+#   scripts/repo.sh pull REPO         download fleets/ into REPO (to add to what's published)
+#   scripts/repo.sh push REPO         upload REPO to fleets/: packages first, then the
 #                                     metadata, the signed files last
 #
-# Layout: apt/ (pool/main/…, dists/stable/{InRelease,Release,Release.gpg,main/binary-*/Packages*}),
+# Layout, under fleets/: apt/ (pool/main/…, dists/stable/{InRelease,Release,Release.gpg,main/binary-*/Packages*}),
 # yum/<arch>/ (packages, repodata/repomd.xml(.asc)), releases/<version>/ (tarballs, SHA256SUMS(.asc)),
 # ezgh-packages.asc (the public key) and install.sh.
 #
@@ -17,7 +19,7 @@
 # The subkey has no passphrase: nfpm can't sign rpms with one.
 # build needs apt-ftparchive (apt-utils), createrepo_c and gpg with the signing key; pull and
 # push need the aws CLI and R2_ACCOUNT_ID, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and
-# R2_BUCKET (default ezgh-packages).
+# R2_BUCKET (required, no default).
 set -eu
 
 die() {
@@ -25,8 +27,24 @@ die() {
 	exit 1
 }
 
+PREFIX=fleets
+
+# root is the only bucket location used: s3://BUCKET/fleets.
+root() {
+	printf '%s' "${R2_BUCKET:-}" | grep -Eq '^[a-z0-9][a-z0-9-]{1,62}$' || die "set R2_BUCKET to the bucket's name"
+	echo "s3://$R2_BUCKET/$PREFIX"
+}
+
+# s3 runs aws s3, refusing any bucket path outside root and any deletion.
 s3() {
 	: "${R2_ACCOUNT_ID:?set R2_ACCOUNT_ID}"
+	r=$(root)
+	for a in "$@"; do
+		case $a in
+		--delete* | rm | rb | mv) die "refusing $a: nothing here deletes" ;;
+		s3://*) case $a in "$r"/*) ;; *) die "refusing $a: outside $r/" ;; esac ;;
+		esac
+	done
 	aws s3 "$@" --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com" --only-show-errors
 }
 
@@ -47,7 +65,8 @@ pubkey() {
 
 # push uploads in an order where a client never sees metadata naming files not there yet.
 push() {
-	repo=$1 bucket="s3://${R2_BUCKET:-ezgh-packages}"
+	repo=$1
+	bucket=$(root)
 	nc="--cache-control no-cache"
 	# 1. packages, release files, the key and install.sh
 	s3 sync "$repo/" "$bucket/" --exclude 'apt/dists/*' --exclude '*/repodata/*'
@@ -135,7 +154,7 @@ cmd=${1:-}
 case "$cmd" in
 pubkey) [ $# -eq 2 ] || die "usage: repo.sh pubkey DIR"; pubkey "$2" ;;
 build) [ $# -eq 3 ] || die "usage: repo.sh build DIST REPO"; build "$2" "$3" ;;
-pull) [ $# -eq 2 ] || die "usage: repo.sh pull REPO"; mkdir -p "$2"; s3 sync "s3://${R2_BUCKET:-ezgh-packages}/" "$2/" ;;
+pull) [ $# -eq 2 ] || die "usage: repo.sh pull REPO"; r=$(root); mkdir -p "$2"; s3 sync "$r/" "$2/" ;;
 push) [ $# -eq 2 ] || die "usage: repo.sh push REPO"; push "$2" ;;
 *) die "usage: repo.sh pubkey DIR | build DIST REPO | pull REPO | push REPO" ;;
 esac

@@ -17,17 +17,17 @@ that machine. Work in progress: not released yet.
 On Debian, Ubuntu, RHEL, Rocky, Alma or Fedora, as root:
 
 ```sh
-curl -fsSL https://packages.ezghcloud.com/install.sh | sh -s -- --project PROJECT_ID --api-key-file /path/to/key
+curl -fsSL https://get.ezghcloud.com/fleets/install.sh | sh -s -- --project PROJECT_ID --api-key-file /path/to/key
 ```
 
 `PROJECT_ID` (and `ORG_ID`) are IDs, UUIDs, not `prj_`/`org_` names, as the console and docs give them.
 
-It adds the signed apt or yum repository at `packages.ezghcloud.com`, refusing a key whose
+It adds the signed apt or yum repository at `get.ezghcloud.com/fleets`, refusing a key whose
 primary fingerprint isn't `7B92 EF92 5D8E BB9D B658 AF65 6E11 06BD 7912 989A`, installs the
 `ezgh-fleets-agent` package, writes the configuration below and starts the service. Leave out
 `--api-key-file` on an EZGH compute instance, or use `--oidc-bot bot_… --oidc-token-file FILE
 --organization ORG_ID` for a workload OIDC token; `--dry-run` prints the steps. Tarballs, with a
-signed `SHA256SUMS`, are under `https://packages.ezghcloud.com/releases/<version>/`, and every
+signed `SHA256SUMS`, are under `https://get.ezghcloud.com/fleets/releases/<version>/`, and every
 package has a GitHub build provenance attestation (`gh attestation verify FILE --repo
 ezgamehost/ezgh-fleets-agent`).
 

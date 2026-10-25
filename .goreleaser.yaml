@@ -1,6 +1,6 @@
 # Agent packages: static Linux binaries for amd64 and arm64, as .deb, .rpm and a tarball.
 # goreleaser only builds (release.disable): release.yml signs, attests and publishes dist/ to
-# the apt/yum repository at packages.ezghcloud.com with scripts/repo.sh.
+# the apt/yum repository at get.ezghcloud.com/fleets with scripts/repo.sh.
 # The packages ship the repository's public key from build/ (scripts/repo.sh pubkey build), at
 # the paths install.sh writes, so an upgrade refreshes it before the signing subkey changes.
 # `goreleaser release --snapshot --clean` builds everything into dist/; CI checks this file.

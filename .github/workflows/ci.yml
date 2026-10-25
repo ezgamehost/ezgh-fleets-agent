@@ -78,6 +78,7 @@ jobs:
           version: "v2.18.3"
           args: check
       - run: packaging/postinstall_test.sh
+      - run: scripts/repo_test.sh
       - name: throwaway signing key, shaped like production's
         # Generated here and gone with the runner. As in production, a certify-only primary and
         # a signing subkey, and the keyring holds only the subkey's secret (sec#).

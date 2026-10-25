@@ -1,14 +1,14 @@
 #!/bin/sh
 # Installs the EZGH Fleets agent from the signed EZGH package repository.
 #
-#   curl -fsSL https://packages.ezghcloud.com/install.sh | sudo sh -s -- --project PROJECT_ID [options]
+#   curl -fsSL https://get.ezghcloud.com/fleets/install.sh | sudo sh -s -- --project PROJECT_ID [options]
 #
 # It adds the repository (checking the signing key's fingerprint against the one pinned below),
 # installs the ezgh-fleets-agent package, writes /etc/ezgh-fleets-agent/config.yaml and starts
 # the service. It does nothing the package can't do. --dry-run prints the steps instead.
 set -eu
 
-REPO_URL=${EZGH_FLEETS_REPO_URL:-https://packages.ezghcloud.com}
+REPO_URL=${EZGH_FLEETS_REPO_URL:-https://get.ezghcloud.com/fleets}
 # The repository's primary key. Its signing subkey can rotate without changing this.
 FINGERPRINT=${EZGH_FLEETS_KEY_FINGERPRINT:-7B92EF925D8EBB9DB658AF656E1106BD7912989A}
 CONFIG_DIR=/etc/ezgh-fleets-agent

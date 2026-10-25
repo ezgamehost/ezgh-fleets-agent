@@ -2,11 +2,12 @@ name: Release
 
 # On a v* tag on main: build the packages, sign them (rpm) and the repository metadata (apt,
 # yum) with the packages subkey, attest their provenance, and publish them to the repository
-# behind packages.ezghcloud.com. Needs the `release` environment's secrets and variables:
+# behind get.ezghcloud.com/fleets (the fleets/ prefix of R2_BUCKET; repo.sh never leaves it).
+# Needs the `release` environment's secrets and variables:
 #   PACKAGES_GPG_KEY         armored secret signing subkey (export-secret-subkeys FPR!: the
 #                            primary stays offline), without a passphrase: nfpm can't use one
 #   PACKAGES_GPG_KEY_ID      vars: the subkey's fingerprint followed by !
-#   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY; vars R2_ACCOUNT_ID, R2_BUCKET
+#   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY; vars R2_ACCOUNT_ID, R2_BUCKET (ezghcloud-get)
 on:
   push:
     tags: ["v*"]
