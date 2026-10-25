@@ -36,3 +36,23 @@ func TestWriteRead(t *testing.T) {
 		t.Fatalf("temporary files left: %v", ents)
 	}
 }
+
+func TestLockExclusive(t *testing.T) {
+	d, err := Open(filepath.Join(t.TempDir(), "s"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := d.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Lock(); !errors.Is(err, ErrLocked) {
+		t.Fatalf("second lock: %v", err)
+	}
+	unlock()
+	again, err := d.Lock()
+	if err != nil {
+		t.Fatalf("after unlock: %v", err)
+	}
+	again()
+}

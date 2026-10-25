@@ -125,6 +125,11 @@ func agent(path string) error {
 	if err != nil {
 		return err
 	}
+	unlock, err := st.Lock()
+	if err != nil {
+		return fmt.Errorf("%s: %w", cfg.StateDir, err)
+	}
+	defer unlock()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	// Before anything else, registration included: a crash mid-session left accounts usable.

@@ -3,11 +3,35 @@ package state
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 type Dir struct{ Path string }
+
+// LockFile is held (flock) by the running agent.
+const LockFile = "agent.lock"
+
+// ErrLocked: another agent is running with this state directory.
+var ErrLocked = errors.New("another ezgh-fleets-agent is already running with this state directory")
+
+// Lock takes the directory's exclusive lock for this process's life, or fails with ErrLocked.
+func (d *Dir) Lock() (unlock func(), err error) {
+	f, err := os.OpenFile(filepath.Join(d.Path, LockFile), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, ErrLocked
+		}
+		return nil, err
+	}
+	return func() { f.Close() }, nil
+}
 
 // Open creates the directory if needed and makes it 0700.
 func Open(path string) (*Dir, error) {
