@@ -48,6 +48,7 @@ func newFixture(t *testing.T) *fixture {
 		},
 		Report: func(v any) error { f.reports <- v; return nil },
 	}
+	t.Cleanup(f.r.Wait) // after TempDir's cleanup is registered, so it runs first: no write after removal
 	return f
 }
 
