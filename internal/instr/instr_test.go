@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ezgamehost/ezgh-systems-agent/internal/state"
-	"github.com/ezgamehost/ezgh-systems-agent/protocol"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/state"
+	"github.com/ezgamehost/ezgh-fleets-agent/protocol"
 )
 
 var t0 = time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)

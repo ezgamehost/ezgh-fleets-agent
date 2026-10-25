@@ -229,10 +229,10 @@ func TestVerifyKeyList(t *testing.T) {
 }
 
 func TestChallengeMessages(t *testing.T) {
-	if got := string(ConnectMessage("n", "x")); got != "ezgh-systems-connect-v1\nn\nx" {
+	if got := string(ConnectMessage("n", "x")); got != "ezgh-fleets-connect-v1\nn\nx" {
 		t.Fatal(got)
 	}
-	if got := string(DataMessage("n", "s", "x")); got != "ezgh-systems-data-v1\nn\ns\nx" {
+	if got := string(DataMessage("n", "s", "x")); got != "ezgh-fleets-data-v1\nn\ns\nx" {
 		t.Fatal(got)
 	}
 }

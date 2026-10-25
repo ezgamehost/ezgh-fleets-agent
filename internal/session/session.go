@@ -21,9 +21,9 @@ import (
 	"github.com/creack/pty"
 	"github.com/jonboulle/clockwork"
 
-	"github.com/ezgamehost/ezgh-systems-agent/internal/conn"
-	"github.com/ezgamehost/ezgh-systems-agent/internal/creds"
-	"github.com/ezgamehost/ezgh-systems-agent/protocol"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/conn"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/creds"
+	"github.com/ezgamehost/ezgh-fleets-agent/protocol"
 )
 
 const (

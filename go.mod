@@ -1,4 +1,4 @@
-module github.com/ezgamehost/ezgh-systems-agent
+module github.com/ezgamehost/ezgh-fleets-agent
 
 go 1.27.1
 

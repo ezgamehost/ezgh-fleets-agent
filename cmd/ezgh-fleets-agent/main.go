@@ -1,4 +1,4 @@
-// Command ezgh-systems-agent is the EZGH Systems Manager agent.
+// Command ezgh-fleets-agent is the EZGH Fleets agent.
 package main
 
 import (
@@ -12,14 +12,14 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/ezgamehost/ezgh-systems-agent/internal/config"
-	"github.com/ezgamehost/ezgh-systems-agent/internal/conn"
-	"github.com/ezgamehost/ezgh-systems-agent/internal/creds"
-	"github.com/ezgamehost/ezgh-systems-agent/internal/instr"
-	"github.com/ezgamehost/ezgh-systems-agent/internal/register"
-	"github.com/ezgamehost/ezgh-systems-agent/internal/session"
-	"github.com/ezgamehost/ezgh-systems-agent/internal/state"
-	"github.com/ezgamehost/ezgh-systems-agent/protocol"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/config"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/conn"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/creds"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/instr"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/register"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/session"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/state"
+	"github.com/ezgamehost/ezgh-fleets-agent/protocol"
 )
 
 // StatusFile holds the connection's last status, for `status`.
@@ -28,10 +28,10 @@ const statusFile = "status.json"
 // version is set at build time.
 var version = "dev"
 
-const usage = `usage: ezgh-systems-agent <command> [--config FILE]
+const usage = `usage: ezgh-fleets-agent <command> [--config FILE]
 
 commands:
-  run       register this machine (once) and stay connected to EZGH Systems Manager
+  run       register this machine (once) and stay connected to EZGH Fleets
   status    show this machine's node
   version   print the version
 `
@@ -44,7 +44,7 @@ func main() {
 		os.Exit(2)
 	}
 	if err := run(os.Args[1:], os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, "ezgh-systems-agent:", err)
+		fmt.Fprintln(os.Stderr, "ezgh-fleets-agent:", err)
 		os.Exit(1)
 	}
 }
@@ -60,7 +60,7 @@ func run(args []string, stdout io.Writer) error {
 	}
 	switch args[0] {
 	case "version":
-		fmt.Fprintln(stdout, "ezgh-systems-agent", version)
+		fmt.Fprintln(stdout, "ezgh-fleets-agent", version)
 		return nil
 	case "status":
 		return status(*configPath, stdout)

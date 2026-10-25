@@ -1,4 +1,4 @@
-// Package register registers this machine as a Systems Manager node, once, and keeps the node
+// Package register registers this machine as a Fleets node, once, and keeps the node
 // binding (an Ed25519 key pair the agent makes itself) in the state directory.
 package register
 
@@ -21,9 +21,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ezgamehost/ezgh-systems-agent/internal/config"
-	"github.com/ezgamehost/ezgh-systems-agent/internal/creds"
-	"github.com/ezgamehost/ezgh-systems-agent/internal/state"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/config"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/creds"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/state"
 )
 
 // NodeFile holds the Identity.
@@ -169,7 +169,7 @@ func (r *Registrar) attempt(ctx context.Context, id *Identity) (time.Duration, e
 	case status == http.StatusOK || status == http.StatusCreated:
 		var n Node
 		if err := json.Unmarshal(rb, &n); err != nil || n.ID == "" || n.Slug == "" {
-			return transientRetry, errors.New("systems-api sent an unreadable node")
+			return transientRetry, errors.New("fleets-api sent an unreadable node")
 		}
 		if n.OrganizationID == "" {
 			n.OrganizationID = org

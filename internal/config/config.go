@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	DefaultPath            = "/etc/ezgh-systems-agent/config.yaml"
-	DefaultCredentialsFile = "/etc/ezgh-systems-agent/credentials"
-	DefaultStateDir        = "/var/lib/ezgh-systems-agent"
+	DefaultPath            = "/etc/ezgh-fleets-agent/config.yaml"
+	DefaultCredentialsFile = "/etc/ezgh-fleets-agent/credentials"
+	DefaultStateDir        = "/var/lib/ezgh-fleets-agent"
 )
 
 // Credential sources.
@@ -76,8 +76,8 @@ func (c *Config) check() error {
 			*v = d
 		}
 	}
-	def(&c.APIURL, "https://systems-api.ezghcloud.com")
-	def(&c.GatewayURL, "wss://systems-gateway.ezghcloud.com")
+	def(&c.APIURL, "https://fleets-api.ezghcloud.com")
+	def(&c.GatewayURL, "wss://fleets-gateway.ezghcloud.com")
 	def(&c.OrgsURL, "https://orgs.ezghcloud.com")
 	def(&c.MetadataURL, "http://169.254.169.254")
 	def(&c.StateDir, DefaultStateDir)

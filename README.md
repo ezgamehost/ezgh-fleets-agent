@@ -1,12 +1,12 @@
-# ezgh-systems-agent
+# ezgh-fleets-agent
 
-The EZGH Systems Manager agent for Linux. It runs on a machine as root, connects outbound to
+The EZGH Fleets agent for Linux. It runs on a machine as root, connects outbound to
 EZGH, and opens shells and runs commands only when EZGH sends it an instruction signed for
 that machine. Work in progress: the agent itself isn't released yet.
 
 ## Layout
 
-- `protocol/`: the wire protocol shared by the agent, the Systems Manager gateway and clients:
+- `protocol/`: the wire protocol shared by the agent, the Fleets gateway and clients:
   control messages, signed instructions and key lists, session data frames, and the resume
   buffer (`Outbox`). `protocol.Roots` holds the public keys trusted to sign instruction key lists.
 - `protocol/devkeys/`: a **development-only** root whose private key is published on purpose.
@@ -14,19 +14,19 @@ that machine. Work in progress: the agent itself isn't released yet.
 
 ## Configuration
 
-`/etc/ezgh-systems-agent/config.yaml`:
+`/etc/ezgh-fleets-agent/config.yaml`:
 
 ```yaml
 project: prj_…            # required
 organization: org_…       # optional: learned from the bot key
 credentials:
   source: auto            # auto | metadata | file | oidc
-  file: /etc/ezgh-systems-agent/credentials   # mode 0600, one API key
+  file: /etc/ezgh-fleets-agent/credentials   # mode 0600, one API key
   oidc: { bot: bot_…, tokenFile: /var/run/secrets/ezgh/token }   # needs organization
 ```
 
 `auto` uses the instance metadata service on an EZGH compute instance, and the key file
-elsewhere. The agent keeps its node binding in `/var/lib/ezgh-systems-agent` (0700).
+elsewhere. The agent keeps its node binding in `/var/lib/ezgh-fleets-agent` (0700).
 
 ## Development
 

@@ -19,9 +19,9 @@ import (
 	"github.com/coder/websocket/wsjson"
 	"github.com/jonboulle/clockwork"
 
-	"github.com/ezgamehost/ezgh-systems-agent/internal/instr"
-	"github.com/ezgamehost/ezgh-systems-agent/internal/state"
-	"github.com/ezgamehost/ezgh-systems-agent/protocol"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/instr"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/state"
+	"github.com/ezgamehost/ezgh-fleets-agent/protocol"
 )
 
 const nodeID = "0b6c3d1e-0000-4000-8000-000000000002"

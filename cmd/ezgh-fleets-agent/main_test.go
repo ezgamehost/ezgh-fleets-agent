@@ -10,7 +10,7 @@ import (
 
 func TestVersionAndStatus(t *testing.T) {
 	var out bytes.Buffer
-	if err := run([]string{"version"}, &out); err != nil || !strings.HasPrefix(out.String(), "ezgh-systems-agent ") {
+	if err := run([]string{"version"}, &out); err != nil || !strings.HasPrefix(out.String(), "ezgh-fleets-agent ") {
 		t.Fatalf("version: %q, %v", out.String(), err)
 	}
 	dir := t.TempDir()

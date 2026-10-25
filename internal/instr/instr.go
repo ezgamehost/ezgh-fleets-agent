@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ezgamehost/ezgh-systems-agent/internal/state"
-	"github.com/ezgamehost/ezgh-systems-agent/protocol"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/state"
+	"github.com/ezgamehost/ezgh-fleets-agent/protocol"
 )
 
 // SeenFile keeps the instructions already accepted, until they expire.

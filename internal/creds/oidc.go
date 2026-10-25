@@ -44,7 +44,7 @@ func (o *OIDC) Key(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	body, _ := json.Marshal(map[string]string{"token": strings.TrimSpace(string(b)), "name": "ezgh-systems-agent"})
+	body, _ := json.Marshal(map[string]string{"token": strings.TrimSpace(string(b)), "name": "ezgh-fleets-agent"})
 	u := strings.TrimRight(o.OrgsURL, "/") + "/v1/organizations/" + url.PathEscape(o.Organization) + "/bots/" + url.PathEscape(o.Bot) + "/oidc-api-keys"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
 	if err != nil {

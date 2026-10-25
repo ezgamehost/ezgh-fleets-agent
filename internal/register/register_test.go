@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ezgamehost/ezgh-systems-agent/internal/config"
-	"github.com/ezgamehost/ezgh-systems-agent/internal/state"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/config"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/state"
 )
 
 type staticKey string

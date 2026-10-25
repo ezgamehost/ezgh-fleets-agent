@@ -19,8 +19,8 @@ var (
 // Signatures cover a context line plus the payload bytes, so bytes signed as one kind
 // never verify as the other.
 const (
-	instructionContext = "ezgh-systems-instruction-v1\n"
-	keyListContext     = "ezgh-systems-keylist-v1\n"
+	instructionContext = "ezgh-fleets-instruction-v1\n"
+	keyListContext     = "ezgh-fleets-keylist-v1\n"
 )
 
 var b64 = base64.RawURLEncoding

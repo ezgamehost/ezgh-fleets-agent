@@ -6,7 +6,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/ezgamehost/ezgh-systems-agent/internal/config"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/config"
 )
 
 // Source hands out the current bot key.

@@ -5,7 +5,7 @@ import (
 	"os/user"
 	"testing"
 
-	"github.com/ezgamehost/ezgh-systems-agent/protocol"
+	"github.com/ezgamehost/ezgh-fleets-agent/protocol"
 )
 
 func TestNamedAccountShell(t *testing.T) {

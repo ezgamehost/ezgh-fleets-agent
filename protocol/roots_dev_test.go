@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ezgamehost/ezgh-systems-agent/protocol/devkeys"
+	"github.com/ezgamehost/ezgh-fleets-agent/protocol/devkeys"
 )
 
 func TestDevRootTrusted(t *testing.T) {

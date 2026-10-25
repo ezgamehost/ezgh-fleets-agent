@@ -1,4 +1,4 @@
-// Package protocol is the wire protocol between ezgh-systems-agent, the EZGH Systems Manager
+// Package protocol is the wire protocol between ezgh-fleets-agent, the EZGH Fleets
 // gateway and the clients (console and CLI) that open shell sessions through it.
 //
 // Agent control connections (/agent/v1/connect) carry JSON text frames whose "t" field names
@@ -10,12 +10,12 @@ package protocol
 import "time"
 
 const (
-	AgentSubprotocol   = "ezgh.systems.agent.v1"
-	SessionSubprotocol = "ezgh.systems.session.v1"
+	AgentSubprotocol   = "ezgh.fleets.agent.v1"
+	SessionSubprotocol = "ezgh.fleets.session.v1"
 	TicketPrefix       = "ticket."
-	HeaderNode         = "EZGH-Node"               // nod_ slug on agent upgrades
-	ConnectContext     = "ezgh-systems-connect-v1" // signed: ConnectContext+"\n"+nodeID+"\n"+nonce
-	DataContext        = "ezgh-systems-data-v1"    // signed: DataContext+"\n"+nodeID+"\n"+sessionID+"\n"+nonce
+	HeaderNode         = "EZGH-Node"              // nod_ slug on agent upgrades
+	ConnectContext     = "ezgh-fleets-connect-v1" // signed: ConnectContext+"\n"+nodeID+"\n"+nonce
+	DataContext        = "ezgh-fleets-data-v1"    // signed: DataContext+"\n"+nodeID+"\n"+sessionID+"\n"+nonce
 	MaxFrame           = 1 << 20
 	ResumeBuffer       = 256 << 10
 )

@@ -1,4 +1,4 @@
-// Package conn keeps the agent's control connection to the Systems Manager gateway: it
+// Package conn keeps the agent's control connection to the Fleets gateway: it
 // authenticates (bot key plus a challenge signed with the node binding), checks the
 // instructions it relays, rekeys, and reconnects with jittered backoff.
 package conn
@@ -22,9 +22,9 @@ import (
 	"github.com/coder/websocket/wsjson"
 	"github.com/jonboulle/clockwork"
 
-	"github.com/ezgamehost/ezgh-systems-agent/internal/creds"
-	"github.com/ezgamehost/ezgh-systems-agent/internal/instr"
-	"github.com/ezgamehost/ezgh-systems-agent/protocol"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/creds"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/instr"
+	"github.com/ezgamehost/ezgh-fleets-agent/protocol"
 )
 
 const (
@@ -49,7 +49,7 @@ type Handler interface {
 	SessionClosed(sessionID, reason string)
 }
 
-// Status is the connection's state, for `ezgh-systems-agent status`.
+// Status is the connection's state, for `ezgh-fleets-agent status`.
 type Status struct {
 	Connected bool          `json:"connected"`
 	Since     time.Time     `json:"since"`

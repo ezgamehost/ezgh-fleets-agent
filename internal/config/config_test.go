@@ -24,7 +24,7 @@ func TestLoadDefaults(t *testing.T) {
 	if c.Credentials.Source != SourceAuto || c.Credentials.File != DefaultCredentialsFile || c.StateDir != DefaultStateDir {
 		t.Fatalf("defaults: %+v", c)
 	}
-	if c.APIURL != "https://systems-api.ezghcloud.com" || c.GatewayURL != "wss://systems-gateway.ezghcloud.com" {
+	if c.APIURL != "https://fleets-api.ezghcloud.com" || c.GatewayURL != "wss://fleets-gateway.ezghcloud.com" {
 		t.Fatalf("urls: %+v", c)
 	}
 }

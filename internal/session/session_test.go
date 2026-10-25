@@ -25,7 +25,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 	"github.com/jonboulle/clockwork"
 
-	"github.com/ezgamehost/ezgh-systems-agent/protocol"
+	"github.com/ezgamehost/ezgh-fleets-agent/protocol"
 )
 
 const (
