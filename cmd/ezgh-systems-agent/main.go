@@ -17,6 +17,7 @@ import (
 	"github.com/ezgamehost/ezgh-systems-agent/internal/creds"
 	"github.com/ezgamehost/ezgh-systems-agent/internal/instr"
 	"github.com/ezgamehost/ezgh-systems-agent/internal/register"
+	"github.com/ezgamehost/ezgh-systems-agent/internal/session"
 	"github.com/ezgamehost/ezgh-systems-agent/internal/state"
 	"github.com/ezgamehost/ezgh-systems-agent/protocol"
 )
@@ -133,9 +134,20 @@ func agent(path string) error {
 	if err != nil {
 		return err
 	}
-	c := &conn.Conn{
+	var c *conn.Conn
+	sessions := &session.Manager{
 		GatewayURL: cfg.GatewayURL, NodeID: id.Node.ID, NodeSlug: id.Node.Slug, PrivateKey: id.PrivateKey(),
-		Version: version, Creds: src, Checker: chk, Handler: &dispatch{log: log}, Log: log,
+		Version: version, Creds: src, Spawn: session.NamedAccountShell, Log: log,
+		Report: func(v any) {
+			if err := c.Send(ctx, v); err != nil {
+				log.Warn("couldn't report to the gateway", "err", err)
+			}
+		},
+	}
+	defer sessions.Shutdown()
+	c = &conn.Conn{
+		GatewayURL: cfg.GatewayURL, NodeID: id.Node.ID, NodeSlug: id.Node.Slug, PrivateKey: id.PrivateKey(),
+		Version: version, Creds: src, Checker: chk, Handler: &dispatch{log: log, sessions: sessions}, Log: log,
 		OnStatus: func(s conn.Status) {
 			if err := st.Write(statusFile, s); err != nil {
 				log.Warn("couldn't write the status file", "err", err)
@@ -146,10 +158,20 @@ func agent(path string) error {
 }
 
 // dispatch routes verified instructions.
-type dispatch struct{ log *slog.Logger }
+type dispatch struct {
+	log      *slog.Logger
+	sessions *session.Manager
+}
 
 func (d *dispatch) Instruction(_ context.Context, in protocol.Instruction) {
-	d.log.Warn("instruction not supported by this agent yet", "type", in.Type, "id", in.ID)
+	switch in.Type {
+	case protocol.TypeOpenSession:
+		d.sessions.Open(in)
+	case protocol.TypeResumeSession:
+		d.sessions.Resume(in)
+	default:
+		d.log.Warn("instruction not supported by this agent yet", "type", in.Type, "id", in.ID)
+	}
 }
-func (d *dispatch) Cancel(string)                {}
-func (d *dispatch) SessionClosed(string, string) {}
+func (d *dispatch) Cancel(string)                   {}
+func (d *dispatch) SessionClosed(id, reason string) { d.sessions.Close(id, reason) }
