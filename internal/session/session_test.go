@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -46,14 +47,15 @@ func (w testWriter) Write(p []byte) (int, error) {
 }
 
 type fixture struct {
-	t       *testing.T
-	m       *Manager
-	clock   *clockwork.FakeClock
-	conns   chan *websocket.Conn
-	mu      sync.Mutex
-	refuse  bool
-	ended   chan protocol.SessionEnded
-	nodePub ed25519.PublicKey
+	t        *testing.T
+	m        *Manager
+	clock    *clockwork.FakeClock
+	conns    chan *websocket.Conn
+	mu       sync.Mutex
+	refuse   bool
+	ended    chan protocol.SessionEnded
+	nodePub  ed25519.PublicKey
+	released atomic.Int32
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -93,10 +95,10 @@ func newFixture(t *testing.T) *fixture {
 	f.m = &Manager{
 		GatewayURL: "ws" + strings.TrimPrefix(srv.URL, "http"), NodeID: nodeID, NodeSlug: "nod_abc", PrivateKey: priv,
 		Creds: key{}, Clock: f.clock, Log: slog.New(slog.NewTextHandler(testWriter{t}, nil)),
-		Spawn: func(protocol.Instruction) (*exec.Cmd, error) {
+		Spawn: func(protocol.Instruction) (*exec.Cmd, func(), error) {
 			cmd := exec.Command("/bin/sh")
 			cmd.Env = []string{"PS1=$ ", "TERM=dumb", "PATH=/usr/bin:/bin"}
-			return cmd, nil
+			return cmd, func() { f.released.Add(1) }, nil
 		},
 		Report: func(v any) { f.ended <- v.(protocol.SessionEnded) },
 	}
@@ -233,6 +235,9 @@ func TestSessionShell(t *testing.T) {
 	}
 	if e := f.waitEnded(); e.Reason != ReasonExited || e.SessionID != sessionID {
 		t.Fatalf("ended %+v", e)
+	}
+	if f.released.Load() != 1 {
+		t.Fatalf("account released %d times", f.released.Load())
 	}
 }
 

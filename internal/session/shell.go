@@ -10,20 +10,14 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/ezgamehost/ezgh-fleets-agent/protocol"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/accounts"
 )
 
-// NamedAccountShell starts a login shell as the instruction's existing account.
-//
-// shortcut: named accounts only; ezgh-user and per-person accounts (created on first use)
-// come with the OS accounts code, which replaces this Spawn.
-func NamedAccountShell(in protocol.Instruction) (*exec.Cmd, error) {
-	if in.OSUser == nil {
-		return nil, ErrOSUserNotFound
-	}
-	u, err := user.Lookup(*in.OSUser)
+// AccountShell builds a login shell as the named, existing account.
+func AccountShell(name string) (*exec.Cmd, error) {
+	u, err := user.Lookup(name)
 	if err != nil {
-		return nil, ErrOSUserNotFound
+		return nil, accounts.ErrNotFound
 	}
 	uid, _ := strconv.ParseUint(u.Uid, 10, 32)
 	gid, _ := strconv.ParseUint(u.Gid, 10, 32)

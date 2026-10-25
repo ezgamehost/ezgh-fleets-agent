@@ -9,9 +9,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/accounts"
 	"github.com/ezgamehost/ezgh-fleets-agent/internal/config"
 	"github.com/ezgamehost/ezgh-fleets-agent/internal/conn"
 	"github.com/ezgamehost/ezgh-fleets-agent/internal/creds"
@@ -134,10 +136,26 @@ func agent(path string) error {
 	if err != nil {
 		return err
 	}
+	accts := &accounts.Manager{Log: log}
+	if err := accts.ExpirePersons(ctx); err != nil {
+		log.Error("couldn't expire per-person accounts at start", "err", err)
+	}
+	spawn := func(in protocol.Instruction) (*exec.Cmd, func(), error) {
+		name, release, err := accts.Acquire(ctx, in)
+		if err != nil {
+			return nil, nil, err
+		}
+		cmd, err := session.AccountShell(name)
+		if err != nil {
+			release()
+			return nil, nil, err
+		}
+		return cmd, release, nil
+	}
 	var c *conn.Conn
 	sessions := &session.Manager{
 		GatewayURL: cfg.GatewayURL, NodeID: id.Node.ID, NodeSlug: id.Node.Slug, PrivateKey: id.PrivateKey(),
-		Version: version, Creds: src, Spawn: session.NamedAccountShell, Log: log,
+		Version: version, Creds: src, Spawn: spawn, Log: log,
 		Report: func(v any) {
 			if err := c.Send(ctx, v); err != nil {
 				log.Warn("couldn't report to the gateway", "err", err)

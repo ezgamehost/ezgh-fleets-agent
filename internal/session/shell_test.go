@@ -5,22 +5,18 @@ import (
 	"os/user"
 	"testing"
 
-	"github.com/ezgamehost/ezgh-fleets-agent/protocol"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/accounts"
 )
 
-func TestNamedAccountShell(t *testing.T) {
-	if _, err := NamedAccountShell(protocol.Instruction{}); !errors.Is(err, ErrOSUserNotFound) {
-		t.Fatalf("no account: %v", err)
-	}
-	missing := "ezgh-no-such-user"
-	if _, err := NamedAccountShell(protocol.Instruction{OSUser: &missing}); !errors.Is(err, ErrOSUserNotFound) {
+func TestAccountShell(t *testing.T) {
+	if _, err := AccountShell("ezgh-no-such-user"); !errors.Is(err, accounts.ErrNotFound) {
 		t.Fatalf("missing account: %v", err)
 	}
 	me, err := user.Current()
 	if err != nil {
 		t.Skip(err)
 	}
-	cmd, err := NamedAccountShell(protocol.Instruction{OSUser: &me.Username})
+	cmd, err := AccountShell(me.Username)
 	if err != nil {
 		t.Fatal(err)
 	}

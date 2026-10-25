@@ -21,6 +21,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/jonboulle/clockwork"
 
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/accounts"
 	"github.com/ezgamehost/ezgh-fleets-agent/internal/conn"
 	"github.com/ezgamehost/ezgh-fleets-agent/internal/creds"
 	"github.com/ezgamehost/ezgh-fleets-agent/protocol"
@@ -44,11 +45,12 @@ const (
 	ReasonResumeGap      = "resume_gap"
 )
 
-// ErrOSUserNotFound means the session's account doesn't exist on this machine.
-var ErrOSUserNotFound = errors.New("osUser_not_found")
+// ReasonStartFailed: the account or shell couldn't be readied for another reason.
+const ReasonStartFailed = "start_failed"
 
-// Spawn builds the shell command for a session (not started).
-type Spawn func(in protocol.Instruction) (*exec.Cmd, error)
+// Spawn readies the session's account and builds its shell command (not started). release
+// is called when the session ends, after its processes are killed.
+type Spawn func(in protocol.Instruction) (cmd *exec.Cmd, release func(), err error)
 
 type Manager struct {
 	GatewayURL string
@@ -142,6 +144,7 @@ type session struct {
 	ws       *websocket.Conn
 	pty      *os.File
 	cmd      *exec.Cmd
+	release  func()
 	out      protocol.Outbox
 	written  uint64 // output bytes put in out
 	acked    uint64 // output bytes the peer has
@@ -278,8 +281,12 @@ func (s *session) attach(ws *websocket.Conn, from uint64) bool {
 	if start {
 		if err := s.start(); err != nil {
 			s.m.Log.Warn("session not started", "session", s.in.ID, "err", err)
-			_ = ws.Close(websocket.StatusNormalClosure, ReasonOSUserNotFound)
-			s.end(ReasonOSUserNotFound, true)
+			reason := ReasonStartFailed
+			if errors.Is(err, accounts.ErrNotFound) {
+				reason = ReasonOSUserNotFound
+			}
+			_ = ws.Close(websocket.StatusNormalClosure, reason)
+			s.end(reason, true)
 			return false
 		}
 	}
@@ -296,16 +303,17 @@ func (s *session) attach(ws *websocket.Conn, from uint64) bool {
 }
 
 func (s *session) start() error {
-	cmd, err := s.m.Spawn(s.in)
+	cmd, release, err := s.m.Spawn(s.in)
 	if err != nil {
 		return err
 	}
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 80})
 	if err != nil {
+		release()
 		return err
 	}
 	s.mu.Lock()
-	s.pty, s.cmd = f, cmd
+	s.pty, s.cmd, s.release = f, cmd, release
 	s.mu.Unlock()
 	s.m.wg.Go(s.pump)
 	s.m.wg.Go(s.wait)
@@ -547,7 +555,7 @@ func (s *session) end(reason string, report bool) {
 		reason = ReasonExited
 	}
 	s.cond.Broadcast()
-	cmd, f, ws := s.cmd, s.pty, s.ws
+	cmd, f, ws, release := s.cmd, s.pty, s.ws, s.release
 	s.mu.Unlock()
 	s.gone.Stop()
 	if cmd != nil && cmd.Process != nil {
@@ -555,6 +563,9 @@ func (s *session) end(reason string, report bool) {
 	}
 	if f != nil {
 		_ = f.Close() // hangs up the terminal: its foreground jobs get SIGHUP
+	}
+	if release != nil {
+		release() // a per-person account's last session: expired, its processes ended
 	}
 	if ws != nil {
 		ws.CloseNow()
