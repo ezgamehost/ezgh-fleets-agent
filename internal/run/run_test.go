@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -258,5 +259,68 @@ func TestDuplicateInstructionRunsOnce(t *testing.T) {
 	f.result()
 	if b, _ := os.ReadFile(log); string(b) != "x\n" {
 		t.Fatal("ran again after a restart")
+	}
+}
+
+// The scheduler re-sends a running invocation until its give-up time,
+// max(deliveryDeadline, startedAt + timeoutSeconds + 60 s), signing later re-sends with that
+// expiry. The record is kept that long (plus skew), so a re-send past the first delivery
+// deadline is re-reported, never re-run; one after it is refused as expired.
+func TestResendAfterDeadlineReportedNotRerun(t *testing.T) {
+	f := newFixture(t)
+	log := filepath.Join(f.dir, "log")
+	in := command("g1", "echo x >> "+log, 600)
+	in.ExpiresAt = t0.Add(time.Minute) // the delivery deadline
+	f.r.Run(in)
+	f.started()
+	f.result()
+	f.r.Wait()
+
+	var rec record
+	if err := f.r.Dir.Read(file("g1"), &rec); err != nil {
+		t.Fatal(err)
+	}
+	giveUp := t0.Add(600*time.Second + ResendGrace)
+	if !rec.ForgetAfter.Equal(giveUp.Add(instr.Skew)) {
+		t.Fatalf("forgetAfter %s, want the give-up time plus skew %s", rec.ForgetAfter, giveUp.Add(instr.Skew))
+	}
+
+	// Past the delivery deadline, after a restart: the record is still there.
+	f.clock.Advance(time.Minute + instr.Skew + time.Second)
+	if err := f.r.Recover(); err != nil {
+		t.Fatal(err)
+	}
+	resend := in
+	resend.IssuedAt, resend.ExpiresAt = f.clock.Now(), t0.Add(2*time.Hour) // extended by the scheduler
+	f.r.Run(resend)
+	if res := f.result(); res.Status != StatusSucceeded || res.RunID != "g1" {
+		t.Fatalf("re-send: %+v", res)
+	}
+	f.r.Wait()
+	if b, _ := os.ReadFile(log); string(b) != "x\n" {
+		t.Fatalf("ran %d times", strings.Count(string(b), "x"))
+	}
+	if err := f.r.Dir.Read(file("g1"), &rec); err != nil || !rec.ForgetAfter.Equal(resend.ExpiresAt.Add(instr.Skew)) {
+		t.Fatalf("forgetAfter %s (%v), want the re-send's expiry plus skew", rec.ForgetAfter, err)
+	}
+
+	// After that the record goes, and a stale re-send can't get past the instruction check.
+	f.clock.Advance(rec.ForgetAfter.Sub(f.clock.Now()) + time.Second)
+	if err := f.r.Recover(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(f.r.Dir.Path, file("g1"))); !os.IsNotExist(err) {
+		t.Fatalf("record kept past forgetAfter: %v", err)
+	}
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	rootPub, rootPriv, _ := ed25519.GenerateKey(rand.Reader)
+	st, _ := state.Open(filepath.Join(f.dir, "s"))
+	chk, _ := instr.New("n", st, nil)
+	chk.Roots = map[string]ed25519.PublicKey{"r": rootPub}
+	l, _ := protocol.SignKeyList(rootPriv, "r", []protocol.PublicKey{{Kid: "k", PublicKey: pub, NotAfter: t0.Add(24 * time.Hour)}})
+	_ = chk.SetKeyList(l, t0)
+	s, _ := protocol.SignInstruction(priv, "k", resend)
+	if _, err := chk.Check(s, f.clock.Now()); !errors.Is(err, protocol.ErrExpired) {
+		t.Fatalf("stale re-send: %v, want expired", err)
 	}
 }

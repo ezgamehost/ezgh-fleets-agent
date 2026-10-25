@@ -29,6 +29,10 @@ import (
 
 const (
 	KillAfter = 10 * time.Second // SIGTERM, then SIGKILL this much later
+	// ResendGrace: the scheduler re-sends an invocation until
+	// max(delivery deadline, startedAt + timeoutSeconds + ResendGrace), so its record is kept
+	// that long (plus skew) and a re-send is re-reported, never run again.
+	ResendGrace = 60 * time.Second
 
 	StatusSucceeded = "succeeded"
 	StatusFailed    = "failed"
@@ -133,6 +137,10 @@ func (r *Runner) Run(in protocol.Instruction) {
 	var rec record
 	switch err := r.Dir.Read(file(in.ID), &rec); {
 	case err == nil:
+		if until := in.ExpiresAt.Add(instr.Skew); until.After(rec.ForgetAfter) {
+			rec.ForgetAfter = until // a re-send with a later expiry: keep the record as long
+			r.saveLocked(&rec)
+		}
 		if rec.Result != nil {
 			rec.Reported = false
 			r.wg.Go(func() { r.report(&rec) })
@@ -145,7 +153,11 @@ func (r *Runner) Run(in protocol.Instruction) {
 		return
 	}
 	now := r.Clock.Now()
-	rec = record{ID: in.ID, StartedAt: &now, ForgetAfter: in.ExpiresAt.Add(instr.Skew)}
+	giveUp := now.Add(time.Duration(in.TimeoutSeconds)*time.Second + ResendGrace)
+	if in.ExpiresAt.After(giveUp) {
+		giveUp = in.ExpiresAt
+	}
+	rec = record{ID: in.ID, StartedAt: &now, ForgetAfter: giveUp.Add(instr.Skew)}
 	// Written before anything starts: the at-most-once guarantee.
 	if err := r.Dir.Write(file(in.ID), &rec); err != nil {
 		r.Log.Error("couldn't record the invocation; not running it", "run", in.ID, "err", err)
@@ -305,6 +317,18 @@ func (r *Runner) report(rec *record) {
 }
 
 func (r *Runner) save(rec *record) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.saveLocked(rec)
+}
+
+// saveLocked writes rec, keeping the later forgetAfter of rec and the record on disk: a
+// re-send may have extended it while the invocation ran. Holds r.mu.
+func (r *Runner) saveLocked(rec *record) {
+	var cur record
+	if r.Dir.Read(file(rec.ID), &cur) == nil && cur.ForgetAfter.After(rec.ForgetAfter) {
+		rec.ForgetAfter = cur.ForgetAfter
+	}
 	if err := r.Dir.Write(file(rec.ID), rec); err != nil {
 		r.Log.Error("couldn't write the invocation record", "run", rec.ID, "err", err)
 	}
