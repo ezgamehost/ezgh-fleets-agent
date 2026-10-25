@@ -126,16 +126,18 @@ func TestSignInstructionRefusesUnsignable(t *testing.T) {
 
 func TestInstructionJSONNames(t *testing.T) {
 	in := sampleInstruction()
-	in.Person = &Person{Type: "user", ID: "u1", BaseName: "alice"}
 	in.Script = &Script{Shell: "bash", Body: "echo", SHA256: "ab"}
 	in.Parameters = map[string]string{"service": "nginx"}
 	in.EzghUserSudo = true
 	in.TimeoutSeconds = 5
 	b, _ := json.Marshal(in)
-	for _, f := range []string{`"type"`, `"nodeId"`, `"id"`, `"osUser"`, `"person"`, `"baseName"`, `"ezghUserSudo"`, `"script"`, `"sha256"`, `"parameters"`, `"timeoutSeconds"`, `"issuedAt"`, `"expiresAt"`} {
+	for _, f := range []string{`"type"`, `"nodeId"`, `"id"`, `"osUser"`, `"ezghUserSudo"`, `"script"`, `"sha256"`, `"parameters"`, `"timeoutSeconds"`, `"issuedAt"`, `"expiresAt"`} {
 		if !strings.Contains(string(b), f) {
 			t.Errorf("%s missing from %s", f, b)
 		}
+	}
+	if strings.Contains(string(b), `"person"`) {
+		t.Errorf("per-person accounts are gone (PD23): %s", b)
 	}
 }
 

@@ -132,11 +132,7 @@ func agent(path string) error {
 	defer unlock()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	// Before anything else, registration included: a crash mid-session left accounts usable.
-	accts := &accounts.Manager{State: st, Log: log}
-	if err := accts.ExpirePersons(ctx); err != nil {
-		log.Error("couldn't expire per-person accounts at start", "err", err)
-	}
+	accts := &accounts.Manager{Log: log}
 	src := creds.New(cfg)
 	r := &register.Registrar{Config: cfg, State: st, Creds: src, Facts: register.LocalFacts(version), Log: log}
 	invDir, err := state.Open(filepath.Join(cfg.StateDir, "invocations"))
@@ -189,17 +185,12 @@ func serve(ctx context.Context, cfg *config.Config, st *state.Dir, r *register.R
 	if err != nil {
 		return err
 	}
-	spawn := func(in protocol.Instruction) (*exec.Cmd, func(), error) {
-		name, release, err := accts.Acquire(ctx, in)
+	spawn := func(in protocol.Instruction) (*exec.Cmd, error) {
+		name, err := accts.Acquire(ctx, in)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		cmd, err := session.AccountShell(name)
-		if err != nil {
-			release()
-			return nil, nil, err
-		}
-		return cmd, release, nil
+		return session.AccountShell(name)
 	}
 	sessions := &session.Manager{
 		GatewayURL: cfg.GatewayURL, NodeID: id.Node.ID, NodeSlug: id.Node.Slug, PrivateKey: id.PrivateKey(),

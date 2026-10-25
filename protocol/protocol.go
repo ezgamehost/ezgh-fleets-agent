@@ -154,7 +154,6 @@ type Instruction struct {
 	NodeID         string            `json:"nodeId"` // node UUID
 	ID             string            `json:"id"`     // session or run UUID
 	OSUser         *string           `json:"osUser,omitempty"`
-	Person         *Person           `json:"person,omitempty"`
 	EzghUserSudo   bool              `json:"ezghUserSudo,omitempty"`
 	Command        *string           `json:"command,omitempty"`
 	Script         *Script           `json:"script,omitempty"`
@@ -162,12 +161,6 @@ type Instruction struct {
 	TimeoutSeconds int               `json:"timeoutSeconds,omitempty"`
 	IssuedAt       time.Time         `json:"issuedAt"`
 	ExpiresAt      time.Time         `json:"expiresAt"`
-}
-
-type Person struct {
-	Type     string `json:"type"` // user|ssoUser
-	ID       string `json:"id"`
-	BaseName string `json:"baseName"`
 }
 
 type Script struct {

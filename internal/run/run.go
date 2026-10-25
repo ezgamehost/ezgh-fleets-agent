@@ -46,7 +46,7 @@ var paramName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,63}$`)
 type Runner struct {
 	Dir *state.Dir // one file per invocation
 	// Acquire readies the account; accounts.Manager.Acquire.
-	Acquire func(ctx context.Context, in protocol.Instruction) (string, func(), error)
+	Acquire func(ctx context.Context, in protocol.Instruction) (string, error)
 	Report  func(v any) error // sends on the control connection
 	Clock   clockwork.Clock
 	Log     *slog.Logger
@@ -229,7 +229,7 @@ func (r *Runner) start(in protocol.Instruction, rec *record, p *proc) *protocol.
 	}
 
 	ctx := context.Background()
-	name, release, err := r.Acquire(ctx, in)
+	name, err := r.Acquire(ctx, in)
 	if err != nil {
 		r.Log.Warn("invocation account not ready", "run", in.ID, "err", err)
 		if errors.Is(err, accounts.ErrNotFound) {
@@ -237,7 +237,6 @@ func (r *Runner) start(in protocol.Instruction, rec *record, p *proc) *protocol.
 		}
 		return failed(ReasonStartFailed)
 	}
-	defer release()
 	cmd, err := accounts.Command(name, path, args...)
 	if err != nil {
 		return failed(ReasonOSUserNotFound)

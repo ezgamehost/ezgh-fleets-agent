@@ -51,9 +51,8 @@ const (
 // ReasonStartFailed: the account or shell couldn't be readied for another reason.
 const ReasonStartFailed = "start_failed"
 
-// Spawn readies the session's account and builds its shell command (not started). release
-// is called when the session ends, after its processes are killed.
-type Spawn func(in protocol.Instruction) (cmd *exec.Cmd, release func(), err error)
+// Spawn readies the session's account and builds its shell command (not started).
+type Spawn func(in protocol.Instruction) (*exec.Cmd, error)
 
 type Manager struct {
 	GatewayURL string
@@ -192,7 +191,6 @@ type session struct {
 	ws       *websocket.Conn
 	pty      *os.File
 	cmd      *exec.Cmd
-	release  func()
 	out      protocol.Outbox
 	written  uint64          // output bytes put in out
 	acked    uint64          // output bytes the peer has
@@ -386,13 +384,12 @@ func (s *session) attach(ws *websocket.Conn, from uint64) bool {
 }
 
 func (s *session) start() error {
-	cmd, release, err := s.m.Spawn(s.in)
+	cmd, err := s.m.Spawn(s.in)
 	if err != nil {
 		return err
 	}
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 80})
 	if err != nil {
-		release()
 		return err
 	}
 	s.mu.Lock()
@@ -401,10 +398,9 @@ func (s *session) start() error {
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		_ = f.Close()
 		_ = cmd.Wait()
-		release()
 		return errors.New("session ended while starting")
 	}
-	s.pty, s.cmd, s.release = f, cmd, release
+	s.pty, s.cmd = f, cmd
 	s.mu.Unlock()
 	s.m.wg.Go(s.pump)
 	s.m.wg.Go(s.wait)
@@ -646,7 +642,7 @@ func (s *session) end(reason string, report bool) {
 		reason = ReasonExited
 	}
 	s.cond.Broadcast()
-	cmd, f, ws, release := s.cmd, s.pty, s.ws, s.release
+	cmd, f, ws := s.cmd, s.pty, s.ws
 	s.mu.Unlock()
 	s.gone.Stop()
 	if cmd != nil && cmd.Process != nil {
@@ -654,9 +650,6 @@ func (s *session) end(reason string, report bool) {
 	}
 	if f != nil {
 		_ = f.Close() // hangs up the terminal: its foreground jobs get SIGHUP
-	}
-	if release != nil {
-		release() // a per-person account's last session: expired, its processes ended
 	}
 	if ws != nil {
 		ws.CloseNow()

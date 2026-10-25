@@ -17,7 +17,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -58,7 +57,6 @@ type fixture struct {
 	controlDown bool   // Report fails, as with the control connection down
 	ended       chan protocol.SessionEnded
 	nodePub     ed25519.PublicKey
-	released    atomic.Int32
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -101,10 +99,10 @@ func newFixture(t *testing.T) *fixture {
 	f.m = &Manager{
 		GatewayURL: "ws" + strings.TrimPrefix(srv.URL, "http"), NodeID: nodeID, NodeSlug: "nod_abc", PrivateKey: priv,
 		Creds: key{}, Clock: f.clock, Log: slog.New(slog.NewTextHandler(testWriter{t}, nil)),
-		Spawn: func(protocol.Instruction) (*exec.Cmd, func(), error) {
+		Spawn: func(protocol.Instruction) (*exec.Cmd, error) {
 			cmd := exec.Command("/bin/sh")
 			cmd.Env = []string{"PS1=$ ", "TERM=dumb", "PATH=/usr/bin:/bin"}
-			return cmd, func() { f.released.Add(1) }, nil
+			return cmd, nil
 		},
 		Report: func(v any) error {
 			f.mu.Lock()
@@ -250,9 +248,6 @@ func TestSessionShell(t *testing.T) {
 	}
 	if e := f.waitEnded(); e.Reason != ReasonExited || e.SessionID != sessionID {
 		t.Fatalf("ended %+v", e)
-	}
-	if f.released.Load() != 1 {
-		t.Fatalf("account released %d times", f.released.Load())
 	}
 }
 

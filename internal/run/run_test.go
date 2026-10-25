@@ -43,8 +43,8 @@ func newFixture(t *testing.T) *fixture {
 	f := &fixture{t: t, clock: clockwork.NewFakeClockAt(t0), reports: make(chan any, 16), dir: dir}
 	f.r = &Runner{
 		Dir: st, Clock: f.clock, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Acquire: func(context.Context, protocol.Instruction) (string, func(), error) {
-			return me.Username, func() {}, nil
+		Acquire: func(context.Context, protocol.Instruction) (string, error) {
+			return me.Username, nil
 		},
 		Report: func(v any) error { f.reports <- v; return nil },
 	}
