@@ -299,11 +299,8 @@ func (s *session) serve(ws *websocket.Conn) bool {
 	if s.write(ws, protocol.Resume{T: protocol.TypeResume, Offset: recv}) != nil {
 		return false
 	}
-	var r protocol.Resume
-	rctx, cancel := context.WithTimeout(s.ctx, resumeWait)
-	err := wsjson.Read(rctx, ws, &r)
-	cancel()
-	if err != nil || r.T != protocol.TypeResume {
+	r, err := s.awaitResume(ws)
+	if err != nil {
 		return false
 	}
 	if !s.attach(ws, r.Offset) {
@@ -331,6 +328,24 @@ func (s *session) serve(ws *websocket.Conn) bool {
 	}
 	s.mu.Unlock()
 	return true
+}
+
+// awaitResume reads until the peer's resume, within resumeWait. Input and acks before it
+// (forwarded by the gateway from a client that never lost its side) are dropped: the client
+// resends unacknowledged input after the resume exchange.
+func (s *session) awaitResume(ws *websocket.Conn) (protocol.Resume, error) {
+	ctx, cancel := context.WithTimeout(s.ctx, resumeWait)
+	defer cancel()
+	for {
+		typ, b, err := ws.Read(ctx)
+		if err != nil {
+			return protocol.Resume{}, err
+		}
+		var r protocol.Resume
+		if typ == websocket.MessageText && json.Unmarshal(b, &r) == nil && r.T == protocol.TypeResume {
+			return r, nil
+		}
+	}
 }
 
 // attach makes ws the session's connection and resends output from the peer's offset.

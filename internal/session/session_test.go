@@ -516,3 +516,29 @@ func TestSessionEndedQueuedWhileDisconnected(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 }
+
+// Input and acks the gateway forwards before the client's resume (sent while only the
+// agent's side was down) are skipped, not fatal: the client resends input after the resume.
+func TestInputBeforeResumeSkipped(t *testing.T) {
+	f := newFixture(t)
+	f.open()
+	var c client
+	select {
+	case ws := <-f.conns:
+		c.t, c.ws = t, ws
+	case <-time.After(10 * time.Second):
+		t.Fatal("the agent didn't open a data connection")
+	}
+	var r protocol.Resume
+	if err := wsjson.Read(context.Background(), c.ws, &r); err != nil || r.T != protocol.TypeResume {
+		t.Fatalf("first message: %+v, %v", r, err)
+	}
+	c.sendFrame(0, []byte("echo early\n")) // dropped: resent below after the resume
+	c.control(protocol.Ack{T: protocol.TypeAck, Offset: 0})
+	c.control(protocol.Resume{T: protocol.TypeResume, Offset: 0})
+	c.sendFrame(0, []byte("echo ok$((1+1))\n"))
+	c.waitFor("ok2")
+	if strings.Contains(c.output.String(), "early") {
+		t.Fatalf("input sent before the resume ran: %q", c.output.String())
+	}
+}
