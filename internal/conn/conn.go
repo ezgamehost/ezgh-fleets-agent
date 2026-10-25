@@ -39,6 +39,9 @@ const (
 	BackoffMax    = 60 * time.Second
 	MaxSkew       = instr.Skew
 	handshakeWait = 30 * time.Second
+	// NodeGoneRetry is the wait after the gateway doesn't know the node (404: deregistered).
+	// It keeps re-checking, so a node deregistered by mistake comes back.
+	NodeGoneRetry = time.Hour
 )
 
 var (
@@ -160,6 +163,10 @@ func (c *Conn) connect(ctx context.Context) (welcomed bool, retryAfter time.Dura
 			}
 			if resp.StatusCode == http.StatusForbidden && RefusalCode(resp) == "awaiting_registration" {
 				return false, 0, ErrAwaitingRegistration
+			}
+			if resp.StatusCode == http.StatusNotFound {
+				c.Log.Error("EZGH doesn't know this node: it was deregistered. Uninstall the agent, or delete node.json in its state directory and restart it to register again; re-checking hourly", "node", c.NodeSlug)
+				retryAfter = NodeGoneRetry
 			}
 			if n, perr := strconv.Atoi(resp.Header.Get("Retry-After")); perr == nil && n > 0 {
 				retryAfter = time.Duration(n) * time.Second

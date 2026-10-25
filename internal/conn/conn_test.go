@@ -390,3 +390,32 @@ func TestAwaitingRegistrationStops(t *testing.T) {
 		t.Fatal("Run kept retrying a reset node")
 	}
 }
+
+// A deregistered node is a 404: the agent says so and re-checks hourly, not every minute.
+func TestNodeGoneRechecksHourly(t *testing.T) {
+	f := newFixture(t)
+	g := f.accept()
+	f.handshake(g, t0)
+	f.connected()
+	f.refuse <- http.StatusNotFound
+	g.ws.CloseNow()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	f.disconnected() // the drop: then the usual 750 ms
+	if err := f.clock.BlockUntilContext(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	f.clock.Advance(750 * time.Millisecond)
+	f.disconnected() // the 404
+	if err := f.clock.BlockUntilContext(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	f.clock.Advance(NodeGoneRetry - time.Millisecond)
+	select {
+	case <-f.conns:
+		t.Fatal("re-checked before an hour")
+	case <-time.After(100 * time.Millisecond):
+	}
+	f.clock.Advance(time.Millisecond)
+	f.accept()
+}
