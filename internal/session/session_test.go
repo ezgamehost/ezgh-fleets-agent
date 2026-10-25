@@ -262,7 +262,8 @@ func TestResumeNoLossNoDuplicate(t *testing.T) {
 	c.waitFor("mark42\r\n")
 
 	out := strings.ReplaceAll(c.output.String(), "\r\n", "\n")
-	got := regexp.MustCompile(`(?m)^line(\d+)$`).FindAllStringSubmatch(out, -1)
+	// Not anchored at the line start: the shell's first prompt can land before line0.
+	got := regexp.MustCompile(`(?m)line(\d+)$`).FindAllStringSubmatch(out, -1)
 	if len(got) != n {
 		t.Fatalf("%d lines, want %d", len(got), n)
 	}
@@ -271,7 +272,7 @@ func TestResumeNoLossNoDuplicate(t *testing.T) {
 			t.Fatalf("line %d is line%s: lost or duplicated output", i, m[1])
 		}
 	}
-	if k := len(regexp.MustCompile(`(?m)^mark42$`).FindAllString(out, -1)); k != 1 {
+	if k := len(regexp.MustCompile(`(?m)mark42$`).FindAllString(out, -1)); k != 1 {
 		t.Fatalf("input sent while disconnected ran %d times", k)
 	}
 }
