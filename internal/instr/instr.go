@@ -40,6 +40,9 @@ type Checker struct {
 	State  *state.Dir
 	Roots  map[string]ed25519.PublicKey // protocol.Roots unless set
 	Log    *slog.Logger
+	// NotBefore refuses instructions issued earlier (less Skew): the node's registration
+	// time, before which this state directory's replay record may not reach.
+	NotBefore time.Time
 
 	mu     sync.Mutex
 	keys   []protocol.PublicKey // each trusted until its notAfter
@@ -125,6 +128,9 @@ func (c *Checker) Check(s protocol.SignedInstruction, now time.Time) (protocol.I
 	in, err := protocol.VerifyInstruction(valid, s, c.NodeID, now, Skew)
 	if err != nil {
 		return in, err
+	}
+	if in.IssuedAt.Before(c.NotBefore.Add(-Skew)) {
+		return in, fmt.Errorf("%w: issued before this node registered", ErrReplayed)
 	}
 	signed, err := base64.RawURLEncoding.DecodeString(s.Payload) // canonical: verified above
 	if err != nil {

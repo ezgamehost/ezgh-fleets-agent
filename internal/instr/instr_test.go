@@ -156,3 +156,21 @@ func TestKeyListAllExpired(t *testing.T) {
 		t.Fatalf("signed by an expired key: %v", err)
 	}
 }
+
+// After a wiped state directory the seen set is empty: instructions issued before the node
+// (re-)registered are refused, so none of them can be replayed.
+func TestIssuedBeforeRegistrationRefused(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	c := newChecker(t, protocol.PublicKey{Kid: "k", PublicKey: pub, NotAfter: t0.Add(time.Hour)})
+	c.NotBefore = t0
+	sign := func(id string, at time.Time) protocol.SignedInstruction {
+		s, _ := protocol.SignInstruction(priv, "k", protocol.Instruction{Type: protocol.TypeOpenSession, NodeID: "node-1", ID: id, IssuedAt: at, ExpiresAt: at.Add(10 * time.Minute)})
+		return s
+	}
+	if _, err := c.Check(sign("old", t0.Add(-Skew-time.Second)), t0); !errors.Is(err, ErrReplayed) {
+		t.Fatalf("issued before registration: %v", err)
+	}
+	if _, err := c.Check(sign("skewed", t0.Add(-Skew+time.Second)), t0); err != nil {
+		t.Fatalf("within the skew: %v", err)
+	}
+}

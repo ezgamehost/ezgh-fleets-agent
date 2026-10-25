@@ -46,6 +46,9 @@ type Identity struct {
 	Seed           string `json:"privateKeySeed"` // base64url Ed25519 seed
 	IdempotencyKey string `json:"idempotencyKey"` // reused until the registration is answered
 	Node           *Node  `json:"node,omitempty"`
+	// RegisteredAt: instructions issued before it are refused, as after a wiped state
+	// directory the replay record is gone.
+	RegisteredAt time.Time `json:"registeredAt,omitzero"`
 }
 
 func (i *Identity) PrivateKey() ed25519.PrivateKey {
@@ -189,7 +192,7 @@ func (r *Registrar) attempt(ctx context.Context, id *Identity) (time.Duration, e
 		if n.ProjectID == "" {
 			n.ProjectID = r.Config.Project
 		}
-		id.Node = &n
+		id.Node, id.RegisteredAt = &n, time.Now().UTC()
 		return 0, r.State.Write(NodeFile, id)
 	case status == http.StatusUnauthorized:
 		r.Creds.Invalidate(key)

@@ -185,6 +185,7 @@ func serve(ctx context.Context, cfg *config.Config, st *state.Dir, r *register.R
 	if err != nil {
 		return err
 	}
+	chk.NotBefore = id.RegisteredAt
 	spawn := func(in protocol.Instruction) (*exec.Cmd, error) {
 		name, err := accts.Acquire(ctx, in)
 		if err != nil {

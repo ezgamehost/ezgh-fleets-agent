@@ -201,6 +201,13 @@ func TestResetRegistersAgain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if first.RegisteredAt.IsZero() || second.RegisteredAt.Before(first.RegisteredAt) {
+		t.Fatalf("registeredAt %v then %v", first.RegisteredAt, second.RegisteredAt)
+	}
+	var stored Identity
+	if err := r.State.Read(NodeFile, &stored); err != nil || !stored.RegisteredAt.Equal(second.RegisteredAt) {
+		t.Fatalf("registeredAt not stored: %v, %v", stored.RegisteredAt, err)
+	}
 	if second.Seed == first.Seed || second.IdempotencyKey == first.IdempotencyKey {
 		t.Fatal("registered again with the old binding key or idempotency key")
 	}
