@@ -19,13 +19,20 @@ import (
 	"github.com/ezgamehost/ezgh-fleets-agent/protocol"
 )
 
-// SeenFile keeps the instructions already accepted, until they expire.
-const SeenFile = "seen.json"
+// SeenFile keeps the instructions already accepted, until they expire. KeyListFile keeps
+// the newest key list's issuedAt, so an older list served later is refused.
+const (
+	SeenFile    = "seen.json"
+	KeyListFile = "keylist.json"
+)
 
 // Skew is the clock difference tolerated on an instruction's validity window.
 const Skew = 300 * time.Second
 
-var ErrReplayed = errors.New("replayed")
+var (
+	ErrReplayed        = errors.New("replayed")
+	ErrKeyListRollback = errors.New("key list older than one already accepted")
+)
 
 // Checker is safe for concurrent use.
 type Checker struct {
@@ -34,9 +41,14 @@ type Checker struct {
 	Roots  map[string]ed25519.PublicKey // protocol.Roots unless set
 	Log    *slog.Logger
 
-	mu   sync.Mutex
-	keys map[string]ed25519.PublicKey
-	seen map[string]time.Time // payload hash → when it can be forgotten
+	mu     sync.Mutex
+	keys   map[string]ed25519.PublicKey
+	seen   map[string]time.Time // payload hash → when it can be forgotten
+	newest keyListState
+}
+
+type keyListState struct {
+	IssuedAt time.Time `json:"issuedAt"`
 }
 
 // New loads the seen instructions from the state directory.
@@ -45,10 +57,14 @@ func New(nodeID string, st *state.Dir, log *slog.Logger) (*Checker, error) {
 	if err := st.Read(SeenFile, &c.seen); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("reading %s: %w", SeenFile, err)
 	}
+	if err := st.Read(KeyListFile, &c.newest); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("reading %s: %w", KeyListFile, err)
+	}
 	return c, nil
 }
 
-// SetKeyList replaces the instruction keys with those in l, once it verifies.
+// SetKeyList replaces the instruction keys with those in l, once it verifies and isn't older
+// than the newest list accepted before (a gateway can't serve back a list with a retired key).
 func (c *Checker) SetKeyList(l protocol.SignedKeyList, now time.Time) error {
 	roots := c.Roots
 	if roots == nil {
@@ -58,10 +74,37 @@ func (c *Checker) SetKeyList(l protocol.SignedKeyList, now time.Time) error {
 	if err != nil {
 		return err
 	}
+	at, err := issuedAt(l) // the payload verified above
+	if err != nil {
+		return err
+	}
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	if at.Before(c.newest.IssuedAt) {
+		return fmt.Errorf("%w: issued %s, have %s", ErrKeyListRollback, at.Format(time.RFC3339), c.newest.IssuedAt.Format(time.RFC3339))
+	}
+	if at.After(c.newest.IssuedAt) {
+		if err := c.State.Write(KeyListFile, keyListState{IssuedAt: at}); err != nil {
+			return fmt.Errorf("persisting the key list's issuedAt: %w", err)
+		}
+		c.newest.IssuedAt = at
+	}
 	c.keys = keys
-	c.mu.Unlock()
 	return nil
+}
+
+func issuedAt(l protocol.SignedKeyList) (time.Time, error) {
+	b, err := base64.RawURLEncoding.DecodeString(l.Payload)
+	if err != nil {
+		return time.Time{}, err
+	}
+	var p struct {
+		IssuedAt time.Time `json:"issuedAt"`
+	}
+	if err := json.Unmarshal(b, &p); err != nil {
+		return time.Time{}, err
+	}
+	return p.IssuedAt, nil
 }
 
 // Check verifies s and records it. A replay is ErrReplayed, returned with the instruction.

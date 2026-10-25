@@ -71,3 +71,36 @@ func TestCheck(t *testing.T) {
 		t.Fatal("default reason")
 	}
 }
+
+func TestKeyListRollbackRefused(t *testing.T) {
+	rootPub, rootPriv, _ := ed25519.GenerateKey(rand.Reader)
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	st, _ := state.Open(filepath.Join(t.TempDir(), "s"))
+	keys := []protocol.PublicKey{{Kid: "k", PublicKey: pub, NotAfter: t0.Add(time.Hour)}}
+	older, _ := protocol.SignKeyList(rootPriv, "r", keys)
+	at, _ := issuedAt(older)
+	newer := older
+	for { // signed with the wall clock: re-sign until the timestamps differ
+		newer, _ = protocol.SignKeyList(rootPriv, "r", keys)
+		if n, _ := issuedAt(newer); n.After(at) {
+			break
+		}
+	}
+	c, _ := New("node-1", st, nil)
+	c.Roots = map[string]ed25519.PublicKey{"r": rootPub}
+	if err := c.SetKeyList(newer, t0); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SetKeyList(older, t0); !errors.Is(err, ErrKeyListRollback) {
+		t.Fatalf("an older key list: %v", err)
+	}
+	if err := c.SetKeyList(newer, t0); err != nil {
+		t.Fatalf("the same list again: %v", err)
+	}
+	// Remembered across restarts.
+	c2, _ := New("node-1", st, nil)
+	c2.Roots = c.Roots
+	if err := c2.SetKeyList(older, t0); !errors.Is(err, ErrKeyListRollback) {
+		t.Fatalf("an older key list after a restart: %v", err)
+	}
+}
