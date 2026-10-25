@@ -13,10 +13,16 @@ import (
 	"syscall"
 
 	"github.com/ezgamehost/ezgh-systems-agent/internal/config"
+	"github.com/ezgamehost/ezgh-systems-agent/internal/conn"
 	"github.com/ezgamehost/ezgh-systems-agent/internal/creds"
+	"github.com/ezgamehost/ezgh-systems-agent/internal/instr"
 	"github.com/ezgamehost/ezgh-systems-agent/internal/register"
 	"github.com/ezgamehost/ezgh-systems-agent/internal/state"
+	"github.com/ezgamehost/ezgh-systems-agent/protocol"
 )
+
+// StatusFile holds the connection's last status, for `status`.
+const statusFile = "status.json"
 
 // version is set at build time.
 var version = "dev"
@@ -86,6 +92,22 @@ func status(path string, stdout io.Writer) error {
 		return nil
 	}
 	fmt.Fprintf(stdout, "node: %s (%s)\norganization: %s\nproject: %s\n", id.Node.Slug, id.Node.ID, id.Node.OrganizationID, id.Node.ProjectID)
+	var cs conn.Status
+	if err := st.Read(statusFile, &cs); err != nil {
+		fmt.Fprintln(stdout, "gateway: no connection yet")
+		return nil
+	}
+	link := "disconnected"
+	if cs.Connected {
+		link = "connected"
+	}
+	fmt.Fprintf(stdout, "gateway: %s since %s\n", link, cs.Since.Format("2006-01-02T15:04:05Z07:00"))
+	if cs.LastError != "" && !cs.Connected {
+		fmt.Fprintln(stdout, "last error:", cs.LastError)
+	}
+	if cs.Warning != "" {
+		fmt.Fprintln(stdout, "warning:", cs.Warning)
+	}
 	return nil
 }
 
@@ -107,6 +129,27 @@ func agent(path string) error {
 		return err
 	}
 	log.Info("node ready", "node", id.Node.Slug, "version", version)
-	<-ctx.Done()
-	return nil
+	chk, err := instr.New(id.Node.ID, st, log)
+	if err != nil {
+		return err
+	}
+	c := &conn.Conn{
+		GatewayURL: cfg.GatewayURL, NodeID: id.Node.ID, NodeSlug: id.Node.Slug, PrivateKey: id.PrivateKey(),
+		Version: version, Creds: src, Checker: chk, Handler: &dispatch{log: log}, Log: log,
+		OnStatus: func(s conn.Status) {
+			if err := st.Write(statusFile, s); err != nil {
+				log.Warn("couldn't write the status file", "err", err)
+			}
+		},
+	}
+	return c.Run(ctx)
 }
+
+// dispatch routes verified instructions.
+type dispatch struct{ log *slog.Logger }
+
+func (d *dispatch) Instruction(_ context.Context, in protocol.Instruction) {
+	d.log.Warn("instruction not supported by this agent yet", "type", in.Type, "id", in.ID)
+}
+func (d *dispatch) Cancel(string)                {}
+func (d *dispatch) SessionClosed(string, string) {}
