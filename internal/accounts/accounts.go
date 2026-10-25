@@ -220,6 +220,10 @@ func (m *Manager) ensureEzghUser(ctx context.Context, setSudo, sudo bool) error 
 		}
 		return nil
 	}
+	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+		m.Log.Warn("ezghUserSudo is on but sudo isn't installed (no " + dir + "): opening the session without it")
+		return nil
+	}
 	tmp, err := os.CreateTemp(dir, "."+EzghUser+".*")
 	if err != nil {
 		return err

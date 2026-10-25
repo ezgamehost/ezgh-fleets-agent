@@ -196,3 +196,13 @@ func TestMarkerTrustedOnlyForCreated(t *testing.T) {
 		release()
 	}
 }
+
+// Without sudo installed there's no /etc/sudoers.d: ezghUserSudo is skipped, not fatal.
+func TestEzghUserSudoWithoutSudoers(t *testing.T) {
+	m, _ := newFake(t)
+	m.SudoersDir = filepath.Join(t.TempDir(), "missing")
+	u := EzghUser
+	if _, _, err := m.Acquire(context.Background(), protocol.Instruction{Type: protocol.TypeOpenSession, OSUser: &u, EzghUserSudo: true}); err != nil {
+		t.Fatalf("no sudoers.d: %v", err)
+	}
+}
