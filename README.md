@@ -55,10 +55,13 @@ go vet ./... && go vet -tags dev ./...
 go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
 go test -race ./... && go test -race -tags dev ./...
 shellcheck install.sh scripts/*.sh packaging/*.sh
+GPG_KEY_ID=… scripts/repo.sh pubkey build   # the public key the packages ship
 goreleaser release --snapshot --clean   # packages into dist/
 ```
 
 `release.yml` publishes a `v*` tag on main: `scripts/repo.sh` keeps the apt and yum repository.
+The signing subkey has no passphrase (nfpm can't sign rpms with one), and the packages carry
+the public key at the paths `install.sh` writes, so upgrades refresh it before a subkey change.
 
 ## License
 

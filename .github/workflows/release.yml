@@ -3,8 +3,8 @@ name: Release
 # On a v* tag on main: build the packages, sign them (rpm) and the repository metadata (apt,
 # yum) with the packages subkey, attest their provenance, and publish them to the repository
 # behind packages.ezghcloud.com. Needs the `release` environment's secrets and variables:
-#   PACKAGES_GPG_KEY         armored secret signing subkey (primary stripped)
-#   PACKAGES_GPG_PASSPHRASE  its passphrase
+#   PACKAGES_GPG_KEY         armored secret signing subkey (export-secret-subkeys FPR!: the
+#                            primary stays offline), without a passphrase: nfpm can't use one
 #   PACKAGES_GPG_KEY_ID      vars: the subkey's fingerprint followed by !
 #   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY; vars R2_ACCOUNT_ID, R2_BUCKET
 on:
@@ -51,13 +51,15 @@ jobs:
             echo "GNUPGHOME=$GNUPGHOME"
             echo "RPM_SIGNING_KEY_FILE=$RUNNER_TEMP/packages.key"
           } >>"$GITHUB_ENV"
+      - name: the public key the packages ship
+        env:
+          GPG_KEY_ID: ${{ vars.PACKAGES_GPG_KEY_ID }}
+        run: scripts/repo.sh pubkey build
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
           version: "v2.18.3"
           args: release --clean
-        env:
-          NFPM_PASSPHRASE: ${{ secrets.PACKAGES_GPG_PASSPHRASE }}
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
@@ -68,7 +70,6 @@ jobs:
       - name: publish
         env:
           GPG_KEY_ID: ${{ vars.PACKAGES_GPG_KEY_ID }}
-          GPG_PASSPHRASE: ${{ secrets.PACKAGES_GPG_PASSPHRASE }}
           R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
           R2_BUCKET: ${{ vars.R2_BUCKET }}
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}

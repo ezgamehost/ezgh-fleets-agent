@@ -106,21 +106,35 @@ if ! command -v curl >/dev/null 2>&1; then die "curl is required"; fi
 
 echo "Fetching the repository key"
 key=$(mktemp)
-trap 'rm -f "$key"' EXIT
+gnupg=$(mktemp -d)
+cleanup() {
+	gpgconf --homedir "$gnupg" --kill all >/dev/null 2>&1 || true
+	rm -rf "$key" "$gnupg"
+}
+trap cleanup EXIT
 run curl -fsSL -o "$key" "$REPO_URL/ezgh-packages.asc"
+# Only the pinned key is trusted: the file is imported into a scratch keyring, the key with
+# the pinned primary fingerprint must be in it, and only that key is exported for apt or rpm.
+pinned() { # pinned [--armor]: the pinned key, alone, on stdout
+	gpg --homedir "$gnupg" --batch --export "$@" "$FINGERPRINT"
+}
 if [ -n "$dry_run" ]; then
-	echo "+ check the key's primary fingerprint is $FINGERPRINT"
+	echo "+ import the key into a scratch keyring and check it holds primary fingerprint $FINGERPRINT"
 else
-	got=$(gpg --batch --with-colons --show-keys "$key" 2>/dev/null | awk -F: '$1 == "fpr" { print $10; exit }')
-	[ "$got" = "$FINGERPRINT" ] || die "the repository key's fingerprint is $got, expected $FINGERPRINT: not installing"
+	gpg --homedir "$gnupg" --batch --quiet --import "$key" 2>/dev/null || die "the repository key doesn't import"
+	got=$(gpg --homedir "$gnupg" --batch --with-colons --list-keys "$FINGERPRINT" 2>/dev/null | awk -F: '$1 == "pub" { p = 1; next } p && $1 == "fpr" { print $10; exit }')
+	[ "$got" = "$FINGERPRINT" ] || die "the repository key has no primary key $FINGERPRINT: not installing"
 	echo "Key fingerprint $FINGERPRINT checked"
 fi
 
 case $pm in
 apt)
 	run install -d -m 0755 /etc/apt/keyrings
-	run gpg --batch --yes --dearmor -o /etc/apt/keyrings/ezgh-packages.gpg "$key"
-	run chmod 0644 /etc/apt/keyrings/ezgh-packages.gpg
+	if [ -n "$dry_run" ]; then
+		echo "+ write /etc/apt/keyrings/ezgh-packages.gpg (mode 0644): only key $FINGERPRINT"
+	else
+		pinned | write /etc/apt/keyrings/ezgh-packages.gpg 0644
+	fi
 	write /etc/apt/sources.list.d/ezgh-packages.list 0644 <<EOF
 deb [signed-by=/etc/apt/keyrings/ezgh-packages.gpg] $REPO_URL/apt stable main
 EOF
@@ -129,7 +143,11 @@ EOF
 	;;
 *)
 	run install -d -m 0755 /etc/pki/rpm-gpg
-	run install -m 0644 "$key" /etc/pki/rpm-gpg/ezgh-packages.asc
+	if [ -n "$dry_run" ]; then
+		echo "+ write /etc/pki/rpm-gpg/ezgh-packages.asc (mode 0644): only key $FINGERPRINT"
+	else
+		pinned --armor | write /etc/pki/rpm-gpg/ezgh-packages.asc 0644
+	fi
 	run rpm --import /etc/pki/rpm-gpg/ezgh-packages.asc
 	write /etc/yum.repos.d/ezgh-packages.repo 0644 <<EOF
 [ezgh-packages]
@@ -144,9 +162,14 @@ EOF
 	;;
 esac
 
-run install -d -m 0755 "$CONFIG_DIR"
+run install -d -m 0700 "$CONFIG_DIR"
 if [ -n "$key_file" ]; then
-	run install -m 0600 "$key_file" "$CONFIG_DIR/credentials"
+	# The key may already be in place (--api-key-file /etc/ezgh-fleets-agent/credentials).
+	if [ ! "$key_file" -ef "$CONFIG_DIR/credentials" ]; then
+		run install -m 0600 "$key_file" "$CONFIG_DIR/credentials"
+	fi
+	run chown root:root "$CONFIG_DIR/credentials"
+	run chmod 0600 "$CONFIG_DIR/credentials"
 fi
 {
 	echo "project: $project"
@@ -160,7 +183,7 @@ fi
 	else
 		echo "  source: metadata"
 	fi
-} | write "$CONFIG_DIR/config.yaml" 0644
+} | write "$CONFIG_DIR/config.yaml" 0600
 
 if [ -d /run/systemd/system ]; then
 	run systemctl enable ezgh-fleets-agent.service

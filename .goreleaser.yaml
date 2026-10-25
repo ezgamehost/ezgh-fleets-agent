@@ -1,6 +1,8 @@
 # Agent packages: static Linux binaries for amd64 and arm64, as .deb, .rpm and a tarball.
 # goreleaser only builds (release.disable): release.yml signs, attests and publishes dist/ to
 # the apt/yum repository at packages.ezghcloud.com with scripts/repo.sh.
+# The packages ship the repository's public key from build/ (scripts/repo.sh pubkey build), at
+# the paths install.sh writes, so an upgrade refreshes it before the signing subkey changes.
 # `goreleaser release --snapshot --clean` builds everything into dist/; CI checks this file.
 version: 2
 project_name: ezgh-fleets-agent
@@ -40,9 +42,17 @@ nfpms:
     contents:
       - src: packaging/ezgh-fleets-agent.service
         dst: /usr/lib/systemd/system/ezgh-fleets-agent.service
+      - src: build/ezgh-packages.gpg
+        dst: /etc/apt/keyrings/ezgh-packages.gpg
+        packager: deb
+        file_info: { mode: 0644 }
+      - src: build/ezgh-packages.asc
+        dst: /etc/pki/rpm-gpg/ezgh-packages.asc
+        packager: rpm
+        file_info: { mode: 0644 }
       - dst: /etc/ezgh-fleets-agent
         type: dir
-        file_info: { mode: 0755 }
+        file_info: { mode: 0700 }
       - dst: /var/lib/ezgh-fleets-agent
         type: dir
         file_info: { mode: 0700 }

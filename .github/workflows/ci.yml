@@ -70,44 +70,81 @@ jobs:
           distribution: goreleaser
           version: "v2.18.3"
           args: check
-      - name: throwaway signing key
-        # Generated here and gone with the runner: it stands in for the packages key.
+      - run: packaging/postinstall_test.sh
+      - name: throwaway signing key, shaped like production's
+        # Generated here and gone with the runner. As in production, a certify-only primary and
+        # a signing subkey, and the keyring holds only the subkey's secret (sec#).
         run: |
           export GNUPGHOME="$RUNNER_TEMP/gnupg"
           install -d -m 0700 "$GNUPGHOME"
-          gpg --batch --passphrase '' --quick-gen-key 'EZGH CI throwaway <ci@example.invalid>' rsa3072 sign 1d
-          fpr=$(gpg --batch --with-colons --list-keys | awk -F: '$1 == "fpr" { print $10; exit }')
-          gpg --batch --armor --export-secret-keys "$fpr" >"$RUNNER_TEMP/throwaway.key"
+          gpg --batch --passphrase '' --quick-gen-key 'EZGH CI throwaway <ci@example.invalid>' rsa4096 cert 1d
+          primary=$(gpg --batch --with-colons --list-keys | awk -F: '$1 == "fpr" { print $10; exit }')
+          gpg --batch --passphrase '' --quick-add-key "$primary" rsa4096 sign 1d
+          sub=$(gpg --batch --with-colons --list-keys "$primary" | awk -F: '$1 == "sub" { s = 1; next } s && $1 == "fpr" { print $10; exit }')
+          gpg --batch --armor --export-secret-subkeys "$sub!" >"$RUNNER_TEMP/subkey.key"
+          gpgconf --kill all
+          rm -rf "$GNUPGHOME" && install -d -m 0700 "$GNUPGHOME"
+          gpg --batch --import "$RUNNER_TEMP/subkey.key"
+          gpg --batch --list-secret-keys | grep -q '^sec#' || { echo "the primary's secret is still here"; exit 1; }
+          # Another key, which a tampered key file could carry along with the real one.
+          gpg --batch --passphrase '' --quick-gen-key 'Not EZGH <other@example.invalid>' ed25519 sign 1d
+          other=$(gpg --batch --with-colons --list-keys other@example.invalid | awk -F: '$1 == "fpr" { print $10; exit }')
           {
             echo "GNUPGHOME=$GNUPGHOME"
-            echo "GPG_KEY_ID=$fpr"
-            echo "RPM_SIGNING_KEY_FILE=$RUNNER_TEMP/throwaway.key"
+            echo "GPG_KEY_ID=$sub!"
+            echo "PRIMARY_FPR=$primary"
+            echo "OTHER_FPR=$other"
+            echo "RPM_SIGNING_KEY_FILE=$RUNNER_TEMP/subkey.key"
           } >>"$GITHUB_ENV"
+      - run: scripts/repo.sh pubkey build
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
           version: "v2.18.3"
           args: release --snapshot --clean
       - run: sudo apt-get update -q && sudo apt-get install -y -q apt-utils createrepo-c
-      - run: scripts/repo.sh build dist repo
+      - name: repositories
+        run: |
+          scripts/repo.sh build dist repo
+          # The real key file, with the other key in the same armored block.
+          gpg --batch --armor --export "$PRIMARY_FPR" "$OTHER_FPR" >repo/ezgh-packages.asc
+          # A repository signed by the other key, serving that same file.
+          GPG_KEY_ID="$OTHER_FPR" scripts/repo.sh build dist other
+          cp repo/ezgh-packages.asc other/ezgh-packages.asc
       - name: install from the repository
+        timeout-minutes: 15
         run: |
           python3 -m http.server 8000 --bind 127.0.0.1 --directory repo >/dev/null 2>&1 &
-          run() { # run IMAGE FINGERPRINT SCRIPT
+          python3 -m http.server 8001 --bind 127.0.0.1 --directory other >/dev/null 2>&1 &
+          run() { # run IMAGE PORT FINGERPRINT SCRIPT
             docker run --rm --network host -v "$PWD/repo:/repo:ro" \
-              -e EZGH_FLEETS_REPO_URL=http://127.0.0.1:8000 -e EZGH_FLEETS_KEY_FINGERPRINT="$2" \
-              "$1" sh -euxc "$3"
+              -e EZGH_FLEETS_REPO_URL="http://127.0.0.1:$2" -e EZGH_FLEETS_KEY_FINGERPRINT="$3" \
+              "$1" sh -euxc "$4"
           }
           check='echo bot_key >/tmp/key
             sh /repo/install.sh --project prj_test --api-key-file /tmp/key
             ezgh-fleets-agent version
             test "$(stat -c %a /etc/ezgh-fleets-agent/credentials)" = 600
-            grep -qx "project: prj_test" /etc/ezgh-fleets-agent/config.yaml'
-          # A key with another fingerprint is refused before anything is installed.
-          if run ubuntu:24.04 0000000000000000000000000000000000000000 \
-            'apt-get update -q && apt-get install -y -q curl && sh /repo/install.sh --project prj_test'; then
+            grep -qx "project: prj_test" /etc/ezgh-fleets-agent/config.yaml
+            # Again, with the key already in place.
+            sh /repo/install.sh --project prj_test --api-key-file /etc/ezgh-fleets-agent/credentials
+            test "$(cat /etc/ezgh-fleets-agent/credentials)" = bot_key
+            test "$(stat -c %a:%U /etc/ezgh-fleets-agent/credentials)" = 600:root'
+          ubuntu='apt-get update -q && apt-get install -y -q curl'
+          other_id=$(printf '%s' "$OTHER_FPR" | tail -c 8 | tr A-F a-f) # rpm names keys by it
+          # A key file without the pinned key is refused before anything is installed.
+          if run ubuntu:24.04 8000 0000000000000000000000000000000000000000 "$ubuntu && sh /repo/install.sh --project prj_test"; then
             echo "installed from a repository with the wrong key"; exit 1
           fi
-          run ubuntu:24.04 "$GPG_KEY_ID" "apt-get update -q && apt-get install -y -q curl && $check"
-          run almalinux:9 "$GPG_KEY_ID" "$check
+          # The pinned key is trusted alone: metadata signed by the other key in the file fails.
+          if run ubuntu:24.04 8001 "$PRIMARY_FPR" "$ubuntu && sh /repo/install.sh --project prj_test"; then
+            echo "apt trusted the other key"; exit 1
+          fi
+          if run almalinux:9 8001 "$PRIMARY_FPR" "sh /repo/install.sh --project prj_test"; then
+            echo "dnf trusted the other key"; exit 1
+          fi
+          run ubuntu:24.04 8000 "$PRIMARY_FPR" "$ubuntu && $check
+            test \"\$(gpg --show-keys --with-colons /etc/apt/keyrings/ezgh-packages.gpg | grep -c ^pub)\" = 1"
+          run almalinux:9 8000 "$PRIMARY_FPR" "$check
+            if rpm -q gpg-pubkey --qf '%{version}\\n' | grep -qx $other_id; then exit 1; fi
             rpm -K /repo/yum/x86_64/*.rpm | grep -q 'digests signatures OK'"
