@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"strconv"
 	"strings"
 	"sync"
@@ -404,12 +405,50 @@ func (s *session) attach(ws *websocket.Conn, from uint64) bool {
 	return true
 }
 
+// startPTY starts cmd on a new 80x24 terminal and returns its controlling side. The terminal
+// belongs to cmd's account and the tty group, mode 0620, as sshd leaves it.
+func startPTY(cmd *exec.Cmd) (*os.File, error) {
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer tty.Close()
+	err = pty.Setsize(ptmx, &pty.Winsize{Rows: 24, Cols: 80})
+	if err == nil && os.Geteuid() == 0 {
+		uid, gid := os.Getuid(), -1
+		if cmd.SysProcAttr != nil && cmd.SysProcAttr.Credential != nil {
+			uid = int(cmd.SysProcAttr.Credential.Uid)
+		}
+		if g, gerr := user.LookupGroup("tty"); gerr == nil {
+			gid, _ = strconv.Atoi(g.Gid)
+		}
+		err = tty.Chown(uid, gid)
+	}
+	if err == nil {
+		err = tty.Chmod(0o620)
+	}
+	if err != nil {
+		ptmx.Close()
+		return nil, err
+	}
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Setsid, cmd.SysProcAttr.Setctty = true, true
+	if err := cmd.Start(); err != nil {
+		ptmx.Close()
+		return nil, err
+	}
+	return ptmx, nil
+}
+
 func (s *session) start() error {
 	cmd, err := s.m.Spawn(s.in)
 	if err != nil {
 		return err
 	}
-	f, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 80})
+	f, err := startPTY(cmd)
 	if err != nil {
 		return err
 	}
