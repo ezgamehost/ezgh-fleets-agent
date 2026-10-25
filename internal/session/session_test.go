@@ -542,3 +542,47 @@ func TestInputBeforeResumeSkipped(t *testing.T) {
 		t.Fatalf("input sent before the resume ran: %q", c.output.String())
 	}
 }
+
+// A connection that fails while the buffered output is resent doesn't stay the session's:
+// the client-gone timer runs again, so a session nobody comes back to ends.
+func TestResendFailureDetaches(t *testing.T) {
+	f := newFixture(t)
+	f.open()
+	var c client
+	f.accept(&c)
+	c.send("echo buffered\n")
+	c.waitFor("buffered") // read, never acked: still in the outbox
+	f.setRefuse(true)     // no redial gets in
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := websocket.Accept(w, r, nil)
+		if err == nil {
+			<-r.Context().Done()
+			ws.CloseNow()
+		}
+	}))
+	t.Cleanup(srv.Close)
+	dead, _, err := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dead.CloseNow() // every write on it fails
+
+	f.m.mu.Lock()
+	s := f.m.sessions[sessionID]
+	f.m.mu.Unlock()
+	if s.attach(dead, 0) {
+		t.Fatal("attach over a dead connection succeeded")
+	}
+	s.mu.Lock()
+	attached := s.ws != nil
+	s.mu.Unlock()
+	if attached {
+		t.Fatal("the dead connection stayed attached")
+	}
+	f.waiters(3)
+	f.clock.Advance(ClientGoneAfter)
+	if e := f.waitEnded(); e.Reason != ReasonClientGone {
+		t.Fatalf("ended %+v", e)
+	}
+}

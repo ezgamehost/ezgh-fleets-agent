@@ -319,15 +319,20 @@ func (s *session) serve(ws *websocket.Conn) bool {
 		}
 		s.control(b)
 	}
+	s.detach(ws)
+	return true
+}
+
+// detach drops ws, if it's still the session's connection, and starts the client-gone timer.
+func (s *session) detach(ws *websocket.Conn) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.ws == ws {
 		s.ws = nil
 		if !s.ended {
 			s.gone.Reset(ClientGoneAfter)
 		}
 	}
-	s.mu.Unlock()
-	return true
 }
 
 // awaitResume reads until the peer's resume, within resumeWait. Input and acks before it
@@ -389,6 +394,7 @@ func (s *session) attach(ws *websocket.Conn, from uint64) bool {
 	for len(pending) > 0 {
 		n := min(len(pending), readChunk)
 		if ws.Write(s.ctx, websocket.MessageBinary, protocol.EncodeData(from, pending[:n])) != nil {
+			s.detach(ws)
 			return false
 		}
 		from += uint64(n)
