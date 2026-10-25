@@ -104,3 +104,46 @@ func TestKeyListRollbackRefused(t *testing.T) {
 		t.Fatalf("an older key list after a restart: %v", err)
 	}
 }
+
+func newChecker(t *testing.T, keys ...protocol.PublicKey) *Checker {
+	t.Helper()
+	rootPub, rootPriv, _ := ed25519.GenerateKey(rand.Reader)
+	st, _ := state.Open(filepath.Join(t.TempDir(), "s"))
+	c, err := New("node-1", st, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Roots = map[string]ed25519.PublicKey{"r": rootPub}
+	l, _ := protocol.SignKeyList(rootPriv, "r", keys)
+	if err := c.SetKeyList(l, t0); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func TestReencodedReplayRefused(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	c := newChecker(t, protocol.PublicKey{Kid: "k", PublicKey: pub, NotAfter: t0.Add(time.Hour)})
+	s, _ := protocol.SignInstruction(priv, "k", protocol.Instruction{Type: protocol.TypeOpenSession, NodeID: "node-1", ID: "s1", IssuedAt: t0, ExpiresAt: t0.Add(time.Minute)})
+	if _, err := c.Check(s, t0); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range []protocol.SignedInstruction{
+		{V: 1, Kid: "k", Payload: s.Payload[:8] + "\n" + s.Payload[8:], Sig: s.Sig},
+		{V: 1, Kid: "k", Payload: s.Payload, Sig: s.Sig[:8] + "\r\n" + s.Sig[8:]},
+	} {
+		if _, err := c.Check(v, t0); err == nil {
+			t.Fatalf("a re-encoded copy was accepted: %+v", v)
+		}
+	}
+}
+
+func TestExpiredKeyRefused(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	c := newChecker(t, protocol.PublicKey{Kid: "k", PublicKey: pub, NotAfter: t0.Add(time.Hour)})
+	at := t0.Add(2 * time.Hour) // the key list was set at t0 and never refreshed
+	s, _ := protocol.SignInstruction(priv, "k", protocol.Instruction{Type: protocol.TypeOpenSession, NodeID: "node-1", ID: "s1", IssuedAt: at, ExpiresAt: at.Add(time.Minute)})
+	if _, err := c.Check(s, at); !errors.Is(err, protocol.ErrUnknownKey) {
+		t.Fatalf("signed by a key past its notAfter: %v", err)
+	}
+}

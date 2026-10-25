@@ -108,6 +108,20 @@ func SignKeyList(root ed25519.PrivateKey, rootKid string, keys []PublicKey) (Sig
 
 // VerifyKeyList checks the list against roots and returns the keys still valid at now.
 func VerifyKeyList(roots map[string]ed25519.PublicKey, l SignedKeyList, now time.Time) (map[string]ed25519.PublicKey, error) {
+	ks, err := VerifyKeyListKeys(roots, l, now)
+	if err != nil {
+		return nil, err
+	}
+	keys := map[string]ed25519.PublicKey{}
+	for _, k := range ks {
+		keys[k.Kid] = k.PublicKey
+	}
+	return keys, nil
+}
+
+// VerifyKeyListKeys is VerifyKeyList keeping each key's notAfter, for a holder of the list to
+// stop trusting a key once it passes.
+func VerifyKeyListKeys(roots map[string]ed25519.PublicKey, l SignedKeyList, now time.Time) ([]PublicKey, error) {
 	if l.V != 1 {
 		return nil, fmt.Errorf("%w: version %d", ErrBadSignature, l.V)
 	}
@@ -123,14 +137,14 @@ func VerifyKeyList(roots map[string]ed25519.PublicKey, l SignedKeyList, now time
 	if err := json.Unmarshal(p, &wl); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrBadSignature, err)
 	}
-	keys := map[string]ed25519.PublicKey{}
+	var keys []PublicKey
 	for _, k := range wl.Keys {
 		pub, err := b64.DecodeString(k.PublicKey)
 		if err != nil || len(pub) != ed25519.PublicKeySize {
 			return nil, fmt.Errorf("%w: key %q malformed", ErrBadSignature, k.Kid)
 		}
 		if now.Before(k.NotAfter) {
-			keys[k.Kid] = pub
+			keys = append(keys, PublicKey{Kid: k.Kid, PublicKey: pub, NotAfter: k.NotAfter})
 		}
 	}
 	if len(keys) == 0 {
@@ -140,11 +154,11 @@ func VerifyKeyList(roots map[string]ed25519.PublicKey, l SignedKeyList, now time
 }
 
 func verify(key ed25519.PublicKey, context, payload, sig string) ([]byte, error) {
-	p, err := b64.DecodeString(payload)
+	p, err := canonical(payload)
 	if err != nil {
 		return nil, fmt.Errorf("%w: payload: %v", ErrBadSignature, err)
 	}
-	sg, err := b64.DecodeString(sig)
+	sg, err := canonical(sig)
 	if err != nil {
 		return nil, fmt.Errorf("%w: sig: %v", ErrBadSignature, err)
 	}
@@ -152,4 +166,14 @@ func verify(key ed25519.PublicKey, context, payload, sig string) ([]byte, error)
 		return nil, ErrBadSignature
 	}
 	return p, nil
+}
+
+// canonical decodes s, refusing any encoding but the canonical one: the decoder skips \r and
+// \n and ignores the last character's unused bits, so a replay could otherwise differ in bytes.
+func canonical(s string) ([]byte, error) {
+	b, err := b64.DecodeString(s)
+	if err == nil && b64.EncodeToString(b) != s {
+		err = errors.New("not canonical base64url")
+	}
+	return b, err
 }

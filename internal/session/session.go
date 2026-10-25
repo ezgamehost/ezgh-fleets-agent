@@ -24,6 +24,7 @@ import (
 	"github.com/ezgamehost/ezgh-fleets-agent/internal/accounts"
 	"github.com/ezgamehost/ezgh-fleets-agent/internal/conn"
 	"github.com/ezgamehost/ezgh-fleets-agent/internal/creds"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/instr"
 	"github.com/ezgamehost/ezgh-fleets-agent/protocol"
 )
 
@@ -67,6 +68,7 @@ type Manager struct {
 
 	mu       sync.Mutex
 	sessions map[string]*session
+	ended    map[string]time.Time // ended session IDs → until their openSession expires
 	wg       sync.WaitGroup
 }
 
@@ -81,6 +83,16 @@ func (m *Manager) Open(in protocol.Instruction) {
 		m.sessions = map[string]*session{}
 	}
 	if _, ok := m.sessions[in.ID]; ok {
+		return
+	}
+	now := m.Clock.Now()
+	for id, until := range m.ended {
+		if now.After(until) {
+			delete(m.ended, id)
+		}
+	}
+	if _, ok := m.ended[in.ID]; ok {
+		m.Log.Warn("openSession for a session that already ended; not reopening it", "session", in.ID)
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -313,6 +325,14 @@ func (s *session) start() error {
 		return err
 	}
 	s.mu.Lock()
+	if s.ended { // ended while the shell started: end() saw no process to kill
+		s.mu.Unlock()
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = f.Close()
+		_ = cmd.Wait()
+		release()
+		return errors.New("session ended while starting")
+	}
 	s.pty, s.cmd, s.release = f, cmd, release
 	s.mu.Unlock()
 	s.m.wg.Go(s.pump)
@@ -573,6 +593,10 @@ func (s *session) end(reason string, report bool) {
 	s.cancel()
 	s.m.mu.Lock()
 	delete(s.m.sessions, s.in.ID)
+	if s.m.ended == nil {
+		s.m.ended = map[string]time.Time{}
+	}
+	s.m.ended[s.in.ID] = s.in.ExpiresAt.Add(instr.Skew)
 	s.m.mu.Unlock()
 	s.m.Log.Info("session ended", "session", s.in.ID, "reason", reason)
 	if report && s.m.Report != nil {

@@ -42,8 +42,8 @@ type Checker struct {
 	Log    *slog.Logger
 
 	mu     sync.Mutex
-	keys   map[string]ed25519.PublicKey
-	seen   map[string]time.Time // payload hash → when it can be forgotten
+	keys   []protocol.PublicKey // each trusted until its notAfter
+	seen   map[string]time.Time // signed bytes' hash → when it can be forgotten
 	newest keyListState
 }
 
@@ -70,7 +70,7 @@ func (c *Checker) SetKeyList(l protocol.SignedKeyList, now time.Time) error {
 	if roots == nil {
 		roots = protocol.Roots
 	}
-	keys, err := protocol.VerifyKeyList(roots, l, now)
+	keys, err := protocol.VerifyKeyListKeys(roots, l, now)
 	if err != nil {
 		return err
 	}
@@ -109,16 +109,26 @@ func issuedAt(l protocol.SignedKeyList) (time.Time, error) {
 
 // Check verifies s and records it. A replay is ErrReplayed, returned with the instruction.
 //
-// Replays are keyed by the signed bytes, not the ID: every resumeSession for a session carries
+// Replays are keyed by the signed (decoded) bytes, not the ID: every resumeSession for a session carries
 // the session's ID. Acting on an ID once (a session opened, a run started) is the caller's job.
 func (c *Checker) Check(s protocol.SignedInstruction, now time.Time) (protocol.Instruction, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	in, err := protocol.VerifyInstruction(c.keys, s, c.NodeID, now, Skew)
+	valid := map[string]ed25519.PublicKey{}
+	for _, k := range c.keys {
+		if now.Before(k.NotAfter) {
+			valid[k.Kid] = k.PublicKey
+		}
+	}
+	in, err := protocol.VerifyInstruction(valid, s, c.NodeID, now, Skew)
 	if err != nil {
 		return in, err
 	}
-	sum := sha256.Sum256([]byte(s.Payload))
+	signed, err := base64.RawURLEncoding.DecodeString(s.Payload) // canonical: verified above
+	if err != nil {
+		return in, protocol.ErrBadSignature
+	}
+	sum := sha256.Sum256(signed)
 	h := hex.EncodeToString(sum[:])
 	if _, ok := c.seen[h]; ok {
 		return in, ErrReplayed

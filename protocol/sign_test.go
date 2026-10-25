@@ -236,3 +236,44 @@ func TestChallengeMessages(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// Go's base64 decoder skips \r and \n and ignores the unused low bits of the last character,
+// so one payload has many encodings. Only the canonical one verifies.
+func TestNonCanonicalEncodingRefused(t *testing.T) {
+	pub, priv := newKey(t)
+	keys := map[string]ed25519.PublicKey{"k1": pub}
+	in := sampleInstruction()
+	var good SignedInstruction
+	for i := 0; ; i++ { // an ID whose payload length leaves unused bits in the last character
+		in.ID = strings.Repeat("a", 36+i)
+		good, _ = SignInstruction(priv, "k1", in)
+		if len(good.Payload)%4 != 0 && len(good.Sig)%4 != 0 {
+			break
+		}
+	}
+	if _, err := VerifyInstruction(keys, good, in.NodeID, t0, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	trailing := func(s string) string {
+		const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+		want, _ := base64.RawURLEncoding.DecodeString(s)
+		for _, c := range alphabet {
+			v := s[:len(s)-1] + string(c)
+			if got, err := base64.RawURLEncoding.DecodeString(v); v != s && err == nil && string(got) == string(want) {
+				return v
+			}
+		}
+		t.Fatal("no trailing-bit variant")
+		return ""
+	}
+	for name, s := range map[string]SignedInstruction{
+		"newline in payload":     {V: 1, Kid: "k1", Payload: good.Payload[:10] + "\n" + good.Payload[10:], Sig: good.Sig},
+		"CRLF in signature":      {V: 1, Kid: "k1", Payload: good.Payload, Sig: good.Sig[:10] + "\r\n" + good.Sig[10:]},
+		"trailing bits, payload": {V: 1, Kid: "k1", Payload: trailing(good.Payload), Sig: good.Sig},
+		"trailing bits, sig":     {V: 1, Kid: "k1", Payload: good.Payload, Sig: trailing(good.Sig)},
+	} {
+		if _, err := VerifyInstruction(keys, s, in.NodeID, t0, time.Minute); !errors.Is(err, ErrBadSignature) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+}

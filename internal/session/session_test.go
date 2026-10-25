@@ -26,6 +26,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 	"github.com/jonboulle/clockwork"
 
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/instr"
 	"github.com/ezgamehost/ezgh-fleets-agent/protocol"
 )
 
@@ -343,5 +344,32 @@ func TestGapEndsSession(t *testing.T) {
 	}
 	if e := f.waitEnded(); e.Reason != ReasonResumeGap {
 		t.Fatalf("ended %+v", e)
+	}
+}
+
+// An ended session stays ended: a fresh openSession for its ID (re-signed, so the replay
+// check passes it) doesn't open it again before the instruction expires.
+func TestEndedSessionNotReopened(t *testing.T) {
+	f := newFixture(t)
+	root := "root"
+	in := protocol.Instruction{Type: protocol.TypeOpenSession, NodeID: nodeID, ID: sessionID, OSUser: &root,
+		IssuedAt: f.clock.Now(), ExpiresAt: f.clock.Now().Add(time.Minute)}
+	f.m.Open(in)
+	var c client
+	f.accept(&c)
+	f.m.Close(sessionID, "closed")
+	open := func() bool {
+		f.m.mu.Lock()
+		defer f.m.mu.Unlock()
+		return f.m.sessions[sessionID] != nil
+	}
+	f.m.Open(in)
+	if open() {
+		t.Fatal("an ended session was opened again")
+	}
+	f.clock.Advance(time.Minute + instr.Skew + time.Second)
+	f.m.Open(in) // only an expired instruction could get here, and it'd be refused before
+	if !open() {
+		t.Fatal("the ended ID was never forgotten")
 	}
 }
