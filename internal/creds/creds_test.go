@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -187,5 +188,29 @@ func TestOIDCExchange(t *testing.T) {
 	}
 	if _, err := o.Key(ctx); err == nil || !strings.Contains(err.Error(), "401") {
 		t.Fatalf("a refused token: %v", err)
+	}
+}
+
+// Metadata requests share one client: connections are reused, not one per request.
+func TestMetadataReusesConnections(t *testing.T) {
+	var conns atomic.Int32
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	srv.Config.ConnState = func(_ net.Conn, s http.ConnState) {
+		if s == http.StateNew {
+			conns.Add(1)
+		}
+	}
+	srv.Start()
+	t.Cleanup(srv.Close)
+	for range 5 {
+		p := &Metadata{Endpoint: srv.URL} // a fresh source each time: the client is shared
+		if status, _, err := p.do(context.Background(), http.MethodGet, "/", nil); err != nil || status != http.StatusOK {
+			t.Fatalf("%d, %v", status, err)
+		}
+	}
+	if n := conns.Load(); n != 1 {
+		t.Fatalf("%d connections for 5 requests", n)
 	}
 }

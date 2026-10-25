@@ -160,6 +160,13 @@ func (p *Metadata) newToken(ctx context.Context) error {
 	return nil
 }
 
+// metadataClient is shared, so connections are reused. No proxy: the service is link-local.
+var metadataClient = &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{
+	DialContext:     (&net.Dialer{Timeout: time.Second}).DialContext,
+	MaxIdleConns:    2,
+	IdleConnTimeout: time.Minute,
+}}
+
 func (p *Metadata) do(ctx context.Context, method, path string, h http.Header) (int, []byte, error) {
 	endpoint := p.Endpoint
 	if endpoint == "" {
@@ -178,7 +185,7 @@ func (p *Metadata) do(ctx context.Context, method, path string, h http.Header) (
 	}
 	c := p.HTTP
 	if c == nil {
-		c = &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{DialContext: (&net.Dialer{Timeout: time.Second}).DialContext}}
+		c = metadataClient
 	}
 	resp, err := c.Do(req)
 	if err != nil {
