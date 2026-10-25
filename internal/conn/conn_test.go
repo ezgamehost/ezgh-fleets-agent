@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -364,4 +365,28 @@ type testWriter struct{ t *testing.T }
 func (w testWriter) Write(p []byte) (int, error) {
 	w.t.Log(strings.TrimSpace(string(p)))
 	return len(p), nil
+}
+
+// A reset node is refused before the upgrade (403 awaiting_registration): Run stops so the
+// agent can register again, rather than retrying a binding that's gone.
+func TestAwaitingRegistrationStops(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":{"code":"awaiting_registration","message":"This node was reset: the agent must register again"}}`))
+	}))
+	t.Cleanup(srv.Close)
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	c := &Conn{GatewayURL: "ws" + strings.TrimPrefix(srv.URL, "http"), NodeID: nodeID, NodeSlug: "nod_abc", PrivateKey: priv,
+		Creds: &keys{key: "ezgh_key"}, Clock: clockwork.NewFakeClockAt(t0), Log: slog.New(slog.NewTextHandler(testWriter{t}, nil))}
+	done := make(chan error, 1)
+	go func() { done <- c.Run(context.Background()) }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrAwaitingRegistration) {
+			t.Fatalf("Run = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run kept retrying a reset node")
+	}
 }

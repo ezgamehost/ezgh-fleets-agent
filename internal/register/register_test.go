@@ -183,3 +183,28 @@ func TestRegisterRetriesTransient(t *testing.T) {
 		t.Fatalf("waits %v", *sleeps)
 	}
 }
+
+// After a reset the agent forgets its node and binding key and registers with a new one.
+func TestResetRegistersAgain(t *testing.T) {
+	api := &fakeAPI{t: t, status: []int{http.StatusCreated}}
+	srv := httptest.NewServer(api)
+	t.Cleanup(srv.Close)
+	r, _, _ := newRegistrar(t, srv.URL)
+	first, err := r.Ensure(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Reset(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := r.Ensure(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Seed == first.Seed || second.IdempotencyKey == first.IdempotencyKey {
+		t.Fatal("registered again with the old binding key or idempotency key")
+	}
+	if len(api.bodies) != 2 || api.bodies[1]["publicKey"] == api.bodies[0]["publicKey"] {
+		t.Fatalf("registrations %v, want a second one with a new key", api.bodies)
+	}
+}

@@ -100,7 +100,7 @@ type Registrar struct {
 }
 
 // Ensure returns the stored node, or registers until it has one (or ctx ends). It never
-// deletes the node binding.
+// deletes the node binding; Reset does.
 func (r *Registrar) Ensure(ctx context.Context) (*Identity, error) {
 	var id Identity
 	switch err := r.State.Read(NodeFile, &id); {
@@ -108,12 +108,7 @@ func (r *Registrar) Ensure(ctx context.Context) (*Identity, error) {
 		return &id, nil
 	case err == nil:
 	case errors.Is(err, os.ErrNotExist):
-		seed := make([]byte, ed25519.SeedSize)
-		if _, err := rand.Read(seed); err != nil {
-			return nil, err
-		}
-		id = Identity{Seed: base64.RawURLEncoding.EncodeToString(seed), IdempotencyKey: newIdempotencyKey()}
-		if err := r.State.Write(NodeFile, &id); err != nil {
+		if id, err = r.fresh(); err != nil {
 			return nil, err
 		}
 	default:
@@ -132,6 +127,23 @@ func (r *Registrar) Ensure(ctx context.Context) (*Identity, error) {
 			return nil, err
 		}
 	}
+}
+
+// Reset forgets the node and its binding key, for a node reset in EZGH (the gateway refuses
+// it with awaiting_registration): the next Ensure registers again with a new key.
+func (r *Registrar) Reset() error {
+	_, err := r.fresh()
+	return err
+}
+
+// fresh stores a new, unregistered identity: a new binding key seed and idempotency key.
+func (r *Registrar) fresh() (Identity, error) {
+	seed := make([]byte, ed25519.SeedSize)
+	if _, err := rand.Read(seed); err != nil {
+		return Identity{}, err
+	}
+	id := Identity{Seed: base64.RawURLEncoding.EncodeToString(seed), IdempotencyKey: newIdempotencyKey()}
+	return id, r.State.Write(NodeFile, &id)
 }
 
 // attempt registers once; on failure it says how long to wait.

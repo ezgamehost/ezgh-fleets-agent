@@ -8,11 +8,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/ezgamehost/ezgh-fleets-agent/internal/accounts"
 	"github.com/ezgamehost/ezgh-fleets-agent/internal/config"
@@ -131,6 +134,44 @@ func agent(path string) error {
 	}
 	src := creds.New(cfg)
 	r := &register.Registrar{Config: cfg, State: st, Creds: src, Facts: register.LocalFacts(version), Log: log}
+	invDir, err := state.Open(filepath.Join(cfg.StateDir, "invocations"))
+	if err != nil {
+		return err
+	}
+	var cur atomic.Pointer[conn.Conn]
+	send := func(v any) error {
+		c := cur.Load()
+		if c == nil {
+			return conn.ErrNotConnected
+		}
+		return c.Send(ctx, v)
+	}
+	runner := &run.Runner{Dir: invDir, Acquire: accts.Acquire, Log: log, Report: send}
+	if err := runner.Recover(); err != nil {
+		return err
+	}
+	for resets := 0; ; resets++ {
+		err := serve(ctx, cfg, st, r, src, accts, runner, &cur, log)
+		if !errors.Is(err, conn.ErrAwaitingRegistration) || ctx.Err() != nil {
+			return err
+		}
+		if resets > 0 { // reset again straight after registering: back off, up to a minute
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(conn.Backoff(resets-1, rand.Float64())):
+			}
+		}
+		log.Warn("this node was reset in EZGH: registering again with a new binding key")
+		if err := r.Reset(); err != nil {
+			return err
+		}
+	}
+}
+
+// serve registers (once) and stays connected as the node, until ctx ends or the node is reset.
+func serve(ctx context.Context, cfg *config.Config, st *state.Dir, r *register.Registrar, src creds.Source,
+	accts *accounts.Manager, runner *run.Runner, cur *atomic.Pointer[conn.Conn], log *slog.Logger) error {
 	id, err := r.Ensure(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -155,24 +196,17 @@ func agent(path string) error {
 		}
 		return cmd, release, nil
 	}
-	var c *conn.Conn
-	invDir, err := state.Open(filepath.Join(cfg.StateDir, "invocations"))
-	if err != nil {
-		return err
-	}
-	runner := &run.Runner{Dir: invDir, Acquire: accts.Acquire, Log: log,
-		Report: func(v any) error { return c.Send(ctx, v) }}
 	sessions := &session.Manager{
 		GatewayURL: cfg.GatewayURL, NodeID: id.Node.ID, NodeSlug: id.Node.Slug, PrivateKey: id.PrivateKey(),
 		Version: version, Creds: src, Spawn: spawn, Log: log,
 		Report: func(v any) {
-			if err := c.Send(ctx, v); err != nil {
-				log.Warn("couldn't report to the gateway", "err", err)
+			if c := cur.Load(); c == nil || c.Send(ctx, v) != nil {
+				log.Warn("couldn't report to the gateway", "message", fmt.Sprintf("%T", v))
 			}
 		},
 	}
 	defer sessions.Shutdown()
-	c = &conn.Conn{
+	c := &conn.Conn{
 		GatewayURL: cfg.GatewayURL, NodeID: id.Node.ID, NodeSlug: id.Node.Slug, PrivateKey: id.PrivateKey(),
 		Version: version, Creds: src, Checker: chk, Handler: &dispatch{log: log, sessions: sessions, runner: runner}, Log: log,
 		OnConnected: runner.Resend,
@@ -182,9 +216,8 @@ func agent(path string) error {
 			}
 		},
 	}
-	if err := runner.Recover(); err != nil {
-		return err
-	}
+	cur.Store(c)
+	defer cur.Store(nil)
 	return c.Run(ctx)
 }
 

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
@@ -40,7 +41,11 @@ const (
 	handshakeWait = 30 * time.Second
 )
 
-var ErrNotConnected = errors.New("not connected to the gateway")
+var (
+	ErrNotConnected = errors.New("not connected to the gateway")
+	// ErrAwaitingRegistration ends Run: the node was reset in EZGH and must register again.
+	ErrAwaitingRegistration = errors.New("the node was reset: awaiting registration")
+)
 
 // Handler receives what arrives on the control connection, instructions already verified.
 type Handler interface {
@@ -105,6 +110,10 @@ func (c *Conn) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
+		if errors.Is(err, ErrAwaitingRegistration) {
+			c.setStatus(func(s *Status) { s.Connected, s.Since, s.LastError = false, c.Clock.Now(), errString(err) })
+			return err
+		}
 		if welcomed {
 			attempt = 0
 		}
@@ -148,6 +157,9 @@ func (c *Conn) connect(ctx context.Context) (welcomed bool, retryAfter time.Dura
 		if resp != nil {
 			if resp.StatusCode == http.StatusUnauthorized {
 				c.Creds.Invalidate(key)
+			}
+			if resp.StatusCode == http.StatusForbidden && RefusalCode(resp) == "awaiting_registration" {
+				return false, 0, ErrAwaitingRegistration
 			}
 			if n, perr := strconv.Atoi(resp.Header.Get("Retry-After")); perr == nil && n > 0 {
 				retryAfter = time.Duration(n) * time.Second
@@ -329,6 +341,18 @@ func Dial(ctx context.Context, hc *http.Client, u, key, nodeSlug, version string
 		return nil, nil, err
 	}
 	return ws, nil, nil
+}
+
+// RefusalCode is the error code in a refused upgrade's JSON body ({"error":{"code":…}}).
+func RefusalCode(resp *http.Response) string {
+	if resp == nil || resp.Body == nil {
+		return ""
+	}
+	var e struct {
+		Error struct{ Code string } `json:"error"`
+	}
+	_ = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&e)
+	return e.Error.Code
 }
 
 func errString(err error) string {
