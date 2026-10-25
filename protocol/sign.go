@@ -108,20 +108,25 @@ func SignKeyList(root ed25519.PrivateKey, rootKid string, keys []PublicKey) (Sig
 
 // VerifyKeyList checks the list against roots and returns the keys still valid at now.
 func VerifyKeyList(roots map[string]ed25519.PublicKey, l SignedKeyList, now time.Time) (map[string]ed25519.PublicKey, error) {
-	ks, err := VerifyKeyListKeys(roots, l, now)
+	ks, err := VerifyKeyListKeys(roots, l)
 	if err != nil {
 		return nil, err
 	}
 	keys := map[string]ed25519.PublicKey{}
 	for _, k := range ks {
-		keys[k.Kid] = k.PublicKey
+		if now.Before(k.NotAfter) {
+			keys[k.Kid] = k.PublicKey
+		}
+	}
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("%w: no key in the list is still valid", ErrExpired)
 	}
 	return keys, nil
 }
 
-// VerifyKeyListKeys is VerifyKeyList keeping each key's notAfter, for a holder of the list to
-// stop trusting a key once it passes.
-func VerifyKeyListKeys(roots map[string]ed25519.PublicKey, l SignedKeyList, now time.Time) ([]PublicKey, error) {
+// VerifyKeyListKeys checks the list against roots and returns every key in it with its
+// notAfter, valid yet or not: whoever holds the list checks notAfter each time it uses a key.
+func VerifyKeyListKeys(roots map[string]ed25519.PublicKey, l SignedKeyList) ([]PublicKey, error) {
 	if l.V != 1 {
 		return nil, fmt.Errorf("%w: version %d", ErrBadSignature, l.V)
 	}
@@ -143,12 +148,7 @@ func VerifyKeyListKeys(roots map[string]ed25519.PublicKey, l SignedKeyList, now 
 		if err != nil || len(pub) != ed25519.PublicKeySize {
 			return nil, fmt.Errorf("%w: key %q malformed", ErrBadSignature, k.Kid)
 		}
-		if now.Before(k.NotAfter) {
-			keys = append(keys, PublicKey{Kid: k.Kid, PublicKey: pub, NotAfter: k.NotAfter})
-		}
-	}
-	if len(keys) == 0 {
-		return nil, fmt.Errorf("%w: no key in the list is still valid", ErrExpired)
+		keys = append(keys, PublicKey{Kid: k.Kid, PublicKey: pub, NotAfter: k.NotAfter})
 	}
 	return keys, nil
 }

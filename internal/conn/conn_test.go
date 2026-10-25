@@ -181,8 +181,23 @@ func (f *fixture) handshake(g *gwConn, serverTime time.Time) {
 		f.t.Fatalf("agentVersion %q", hello.AgentVersion)
 	}
 	pub := f.instrKey.Public().(ed25519.PublicKey)
-	l, _ := protocol.SignKeyList(f.root, "root-test", []protocol.PublicKey{{Kid: "k1", PublicKey: pub, NotAfter: t0.Add(24 * time.Hour)}})
+	f.welcome(g, serverTime, f.root, t0.Add(24*time.Hour), pub)
+}
+
+// welcome sends a key list signed by root with one key valid until notAfter.
+func (f *fixture) welcome(g *gwConn, serverTime time.Time, root ed25519.PrivateKey, notAfter time.Time, pub ed25519.PublicKey) {
+	l, _ := protocol.SignKeyList(root, "root-test", []protocol.PublicKey{{Kid: "k1", PublicKey: pub, NotAfter: notAfter}})
 	g.send(f.t, protocol.Welcome{T: protocol.TypeWelcome, KeyList: l, ServerTime: serverTime})
+}
+
+// challenge answers the challenge, without the welcome.
+func (f *fixture) challenge(g *gwConn) {
+	f.t.Helper()
+	nonce := base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	g.send(f.t, protocol.Challenge{T: protocol.TypeChallenge, Nonce: nonce})
+	if typ := g.next(f.t, nil); typ != protocol.TypeHello {
+		f.t.Fatalf("got %q, want hello", typ)
+	}
 }
 
 func (f *fixture) connected() Status {
@@ -418,4 +433,41 @@ func TestNodeGoneRechecksHourly(t *testing.T) {
 	}
 	f.clock.Advance(time.Millisecond)
 	f.accept()
+}
+
+// A verified key list whose keys have all passed their notAfter keeps the node online; its
+// instructions are refused as unknown_key until the gateway serves fresh keys.
+func TestExpiredKeyListStaysConnected(t *testing.T) {
+	f := newFixture(t)
+	g := f.accept()
+	f.challenge(g)
+	f.welcome(g, t0, f.root, t0.Add(-time.Minute), f.instrKey.Public().(ed25519.PublicKey))
+	f.connected()
+	g.send(t, protocol.Deliver{T: protocol.TypeInstruction, Instruction: f.instruction(nodeID, "s1")})
+	var r protocol.Refused
+	if typ := g.next(t, &r); typ != protocol.TypeRefused || r.Reason != "unknown_key" {
+		t.Fatalf("got %q %+v, want refused unknown_key", typ, r)
+	}
+}
+
+// A machine whose clock is far off gets the NTP warning even when the key list is what fails.
+func TestClockWarningBeforeKeyList(t *testing.T) {
+	f := newFixture(t)
+	g := f.accept()
+	f.challenge(g)
+	_, other, _ := ed25519.GenerateKey(rand.Reader)
+	f.welcome(g, t0.Add(2*time.Hour), other, t0.Add(time.Hour), f.instrKey.Public().(ed25519.PublicKey))
+	for {
+		select {
+		case s := <-f.statuses:
+			if s.Connected {
+				t.Fatal("connected with a key list that doesn't verify")
+			}
+			if strings.Contains(s.Warning, "NTP") {
+				return
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("no clock warning")
+		}
+	}
 }

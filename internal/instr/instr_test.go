@@ -147,3 +147,12 @@ func TestExpiredKeyRefused(t *testing.T) {
 		t.Fatalf("signed by a key past its notAfter: %v", err)
 	}
 }
+
+func TestKeyListAllExpired(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	c := newChecker(t, protocol.PublicKey{Kid: "k", PublicKey: pub, NotAfter: t0.Add(-time.Minute)})
+	s, _ := protocol.SignInstruction(priv, "k", protocol.Instruction{Type: protocol.TypeOpenSession, NodeID: "node-1", ID: "s1", IssuedAt: t0, ExpiresAt: t0.Add(time.Minute)})
+	if _, err := c.Check(s, t0); !errors.Is(err, protocol.ErrUnknownKey) {
+		t.Fatalf("signed by an expired key: %v", err)
+	}
+}

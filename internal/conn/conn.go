@@ -187,15 +187,17 @@ func (c *Conn) connect(ctx context.Context) (welcomed bool, retryAfter time.Dura
 		return false, 0, fmt.Errorf("expected welcome, got %q", w.T)
 	}
 	now := c.Clock.Now()
-	if err := c.Checker.SetKeyList(w.KeyList, now); err != nil {
-		_ = ws.Close(websocket.StatusPolicyViolation, "bad key list")
-		return false, 0, fmt.Errorf("the gateway's key list doesn't verify: %w", err)
-	}
+	// First: a clock far off is the likeliest reason for what follows to fail.
 	skew := now.Sub(w.ServerTime)
 	warning := ""
 	if skew > MaxSkew || skew < -MaxSkew {
 		warning = fmt.Sprintf("this machine's clock is %s off EZGH's; instructions will be refused until it's fixed (check NTP)", skew.Round(time.Second))
 		c.Log.Warn(warning)
+	}
+	if err := c.Checker.SetKeyList(w.KeyList, now); err != nil {
+		c.setStatus(func(s *Status) { s.Warning = warning })
+		_ = ws.Close(websocket.StatusPolicyViolation, "bad key list")
+		return false, 0, fmt.Errorf("the gateway's key list doesn't verify: %w", err)
 	}
 
 	c.mu.Lock()

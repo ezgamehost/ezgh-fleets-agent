@@ -70,7 +70,9 @@ func (c *Checker) SetKeyList(l protocol.SignedKeyList, now time.Time) error {
 	if roots == nil {
 		roots = protocol.Roots
 	}
-	keys, err := protocol.VerifyKeyListKeys(roots, l, now)
+	// Keys past their notAfter are kept: Check refuses them (unknown_key), and the node stays
+	// online until the gateway serves fresh ones.
+	keys, err := protocol.VerifyKeyListKeys(roots, l)
 	if err != nil {
 		return err
 	}
