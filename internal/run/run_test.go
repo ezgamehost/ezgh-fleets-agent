@@ -249,6 +249,7 @@ func TestDuplicateInstructionRunsOnce(t *testing.T) {
 
 	// And once across restarts: a new runner on the same state directory.
 	r2 := &Runner{Dir: f.r.Dir, Acquire: f.r.Acquire, Report: f.r.Report, Clock: f.clock, Log: f.r.Log}
+	t.Cleanup(r2.Wait)
 	if err := r2.Recover(); err != nil {
 		t.Fatal(err)
 	}

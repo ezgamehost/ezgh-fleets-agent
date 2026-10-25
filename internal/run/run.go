@@ -53,7 +53,11 @@ type Runner struct {
 
 	mu      sync.Mutex
 	running map[string]*proc
+	wg      sync.WaitGroup
 }
+
+// Wait waits for running invocations and pending reports.
+func (r *Runner) Wait() { r.wg.Wait() }
 
 // record is the invocation's state file.
 type record struct {
@@ -131,7 +135,7 @@ func (r *Runner) Run(in protocol.Instruction) {
 	case err == nil:
 		if rec.Result != nil {
 			rec.Reported = false
-			go r.report(&rec)
+			r.wg.Go(func() { r.report(&rec) })
 		} else if rec.StartedAt != nil {
 			_ = r.Report(protocol.InvocationStarted{T: protocol.TypeInvocationStarted, RunID: in.ID, StartedAt: *rec.StartedAt})
 		}
@@ -149,7 +153,7 @@ func (r *Runner) Run(in protocol.Instruction) {
 	}
 	p := &proc{}
 	r.running[in.ID] = p
-	go r.execute(in, &rec, p)
+	r.wg.Go(func() { r.execute(in, &rec, p) })
 }
 
 // Cancel stops a running invocation: SIGTERM, then SIGKILL after 10 s.
