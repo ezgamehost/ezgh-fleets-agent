@@ -48,16 +48,17 @@ func (w testWriter) Write(p []byte) (int, error) {
 }
 
 type fixture struct {
-	t        *testing.T
-	m        *Manager
-	clock    *clockwork.FakeClock
-	conns    chan *websocket.Conn
-	mu       sync.Mutex
-	refuse   bool
-	retry    string // Retry-After on a refusal
-	ended    chan protocol.SessionEnded
-	nodePub  ed25519.PublicKey
-	released atomic.Int32
+	t           *testing.T
+	m           *Manager
+	clock       *clockwork.FakeClock
+	conns       chan *websocket.Conn
+	mu          sync.Mutex
+	refuse      bool
+	retry       string // Retry-After on a refusal
+	controlDown bool   // Report fails, as with the control connection down
+	ended       chan protocol.SessionEnded
+	nodePub     ed25519.PublicKey
+	released    atomic.Int32
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -105,7 +106,16 @@ func newFixture(t *testing.T) *fixture {
 			cmd.Env = []string{"PS1=$ ", "TERM=dumb", "PATH=/usr/bin:/bin"}
 			return cmd, func() { f.released.Add(1) }, nil
 		},
-		Report: func(v any) { f.ended <- v.(protocol.SessionEnded) },
+		Report: func(v any) error {
+			f.mu.Lock()
+			down := f.controlDown
+			f.mu.Unlock()
+			if down {
+				return errors.New("not connected")
+			}
+			f.ended <- v.(protocol.SessionEnded)
+			return nil
+		},
 	}
 	t.Cleanup(f.m.Shutdown)
 	return f
@@ -454,4 +464,60 @@ func TestRefusedDialHonoursRetryAfter(t *testing.T) {
 	f.noDial(200 * time.Millisecond)
 	f.clock.Advance(time.Millisecond)
 	f.accept(&c)
+}
+
+// When the control connection comes back, a session waiting out a backoff redials at once:
+// it may still be inside its resume window.
+func TestReconnectedRedialsAtOnce(t *testing.T) {
+	f := newFixture(t)
+	f.open()
+	var c client
+	f.accept(&c)
+	f.mu.Lock()
+	f.refuse, f.retry = true, "30"
+	f.mu.Unlock()
+	c.ws.CloseNow() // redialed at once, refused: now waiting 30 s
+	f.waiters(3)
+	f.setRefuse(false)
+	f.m.Reconnected()
+	f.accept(&c)
+}
+
+// A sessionEnded that couldn't be sent is sent when the control connection is back.
+func TestSessionEndedQueuedWhileDisconnected(t *testing.T) {
+	f := newFixture(t)
+	f.open()
+	var c client
+	f.accept(&c)
+	f.mu.Lock()
+	f.controlDown = true
+	f.mu.Unlock()
+	c.send("exit 3\n")
+	c.readUntil(func() bool { return c.exit != nil })
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		f.m.mu.Lock()
+		n := len(f.m.unsent)
+		f.m.mu.Unlock()
+		if n == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("sessionEnded not queued")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	f.mu.Lock()
+	f.controlDown = false
+	f.mu.Unlock()
+	f.m.Reconnected()
+	if e := f.waitEnded(); e.SessionID != sessionID || e.Reason != ReasonExited {
+		t.Fatalf("ended %+v", e)
+	}
+	f.m.Reconnected()
+	select {
+	case e := <-f.ended:
+		t.Fatalf("sent twice: %+v", e)
+	case <-time.After(100 * time.Millisecond):
+	}
 }

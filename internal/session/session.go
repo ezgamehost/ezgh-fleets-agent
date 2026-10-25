@@ -63,14 +63,15 @@ type Manager struct {
 	Version    string
 	Creds      creds.Source
 	Spawn      Spawn
-	Report     func(v any) // sends on the control connection
+	Report     func(v any) error // sends on the control connection
 	Clock      clockwork.Clock
 	HTTP       *http.Client
 	Log        *slog.Logger
 
 	mu       sync.Mutex
 	sessions map[string]*session
-	ended    map[string]time.Time // ended session IDs → until their openSession expires
+	ended    map[string]time.Time    // ended session IDs → until their openSession expires
+	unsent   []protocol.SessionEnded // couldn't be reported: resent by Reconnected
 	wg       sync.WaitGroup
 }
 
@@ -119,6 +120,39 @@ func (m *Manager) Shutdown() {
 		s.end("agent_stopped", false)
 	}
 	m.wg.Wait()
+}
+
+// Reconnected runs when the control connection is back: unreported sessionEnded messages are
+// sent, and sessions without a data connection redial now rather than after their backoff,
+// as they may still be inside their resume window.
+func (m *Manager) Reconnected() {
+	m.mu.Lock()
+	unsent := m.unsent
+	m.unsent = nil
+	var waiting []*session
+	for _, s := range m.sessions {
+		waiting = append(waiting, s)
+	}
+	m.mu.Unlock()
+	for i, e := range unsent {
+		if err := m.Report(e); err != nil {
+			m.mu.Lock()
+			m.unsent = append(unsent[i:], m.unsent...)
+			m.mu.Unlock()
+			break
+		}
+	}
+	for _, s := range waiting {
+		s.mu.Lock()
+		attached := s.ws != nil
+		s.mu.Unlock()
+		if !attached {
+			select {
+			case s.kick <- struct{}{}:
+			default:
+			}
+		}
+	}
 }
 
 // Resume dials a fresh data connection for the session a resumeSession instruction names.
@@ -637,7 +671,13 @@ func (s *session) end(reason string, report bool) {
 	s.m.mu.Unlock()
 	s.m.Log.Info("session ended", "session", s.in.ID, "reason", reason)
 	if report && s.m.Report != nil {
-		s.m.Report(protocol.SessionEnded{T: protocol.TypeSessionEnded, SessionID: s.in.ID, Reason: reason})
+		e := protocol.SessionEnded{T: protocol.TypeSessionEnded, SessionID: s.in.ID, Reason: reason}
+		if err := s.m.Report(e); err != nil {
+			s.m.Log.Warn("couldn't report the session ended; resent on reconnect", "session", s.in.ID, "err", err)
+			s.m.mu.Lock()
+			s.m.unsent = append(s.m.unsent, e)
+			s.m.mu.Unlock()
+		}
 	}
 }
 

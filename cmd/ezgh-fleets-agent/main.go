@@ -151,7 +151,7 @@ func agent(path string) error {
 		return err
 	}
 	for resets := 0; ; resets++ {
-		err := serve(ctx, cfg, st, r, src, accts, runner, &cur, log)
+		err := serve(ctx, cfg, st, r, src, accts, runner, &cur, send, log)
 		if !errors.Is(err, conn.ErrAwaitingRegistration) || ctx.Err() != nil {
 			return err
 		}
@@ -171,7 +171,7 @@ func agent(path string) error {
 
 // serve registers (once) and stays connected as the node, until ctx ends or the node is reset.
 func serve(ctx context.Context, cfg *config.Config, st *state.Dir, r *register.Registrar, src creds.Source,
-	accts *accounts.Manager, runner *run.Runner, cur *atomic.Pointer[conn.Conn], log *slog.Logger) error {
+	accts *accounts.Manager, runner *run.Runner, cur *atomic.Pointer[conn.Conn], send func(any) error, log *slog.Logger) error {
 	id, err := r.Ensure(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -199,17 +199,13 @@ func serve(ctx context.Context, cfg *config.Config, st *state.Dir, r *register.R
 	sessions := &session.Manager{
 		GatewayURL: cfg.GatewayURL, NodeID: id.Node.ID, NodeSlug: id.Node.Slug, PrivateKey: id.PrivateKey(),
 		Version: version, Creds: src, Spawn: spawn, Log: log,
-		Report: func(v any) {
-			if c := cur.Load(); c == nil || c.Send(ctx, v) != nil {
-				log.Warn("couldn't report to the gateway", "message", fmt.Sprintf("%T", v))
-			}
-		},
+		Report: send,
 	}
 	defer sessions.Shutdown()
 	c := &conn.Conn{
 		GatewayURL: cfg.GatewayURL, NodeID: id.Node.ID, NodeSlug: id.Node.Slug, PrivateKey: id.PrivateKey(),
 		Version: version, Creds: src, Checker: chk, Handler: &dispatch{log: log, sessions: sessions, runner: runner}, Log: log,
-		OnConnected: runner.Resend,
+		OnConnected: func() { runner.Resend(); sessions.Reconnected() },
 		OnStatus: func(s conn.Status) {
 			if err := st.Write(statusFile, s); err != nil {
 				log.Warn("couldn't write the status file", "err", err)
