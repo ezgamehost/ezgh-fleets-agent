@@ -25,12 +25,8 @@ const (
 	SourceOIDC     = "oidc"
 )
 
-// fleets-api takes IDs in its paths, not org_ names. A project is its UUID or its prj_ ID, as
-// the metadata service names it.
-var (
-	uuid      = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-	projectID = regexp.MustCompile(`^prj_[a-z0-9]{12}$`)
-)
+// fleets-api takes IDs in its paths, not prj_/org_ names.
+var uuid = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // IsUUID reports whether s is a UUID.
 func IsUUID(s string) bool { return uuid.MatchString(s) }
@@ -40,8 +36,8 @@ var ErrNoProject = errors.New("project is required (or run on an EZGH instance)"
 
 type Config struct {
 	// Organization (optional: the agent asks org-api which one its key belongs to) is a UUID.
-	// Project is a prj_ ID or a UUID; optional on an EZGH instance (credentials auto or
-	// metadata), where the metadata service names it.
+	// Project is a UUID; optional on an EZGH instance (credentials auto or metadata), where the
+	// metadata service names it.
 	Organization string      `yaml:"organization"`
 	Project      string      `yaml:"project"`
 	Credentials  Credentials `yaml:"credentials"`
@@ -84,8 +80,8 @@ func Load(path string) (*Config, error) {
 }
 
 func (c *Config) check() error {
-	if c.Project != "" && !projectID.MatchString(c.Project) && !uuid.MatchString(c.Project) {
-		return errors.New("project must be the project's ID (prj_… or a UUID)")
+	if c.Project != "" && !uuid.MatchString(c.Project) {
+		return errors.New("project must be the project's ID (a UUID), not its prj_ name")
 	}
 	if c.Organization != "" && !uuid.MatchString(c.Organization) {
 		return errors.New("organization must be the organization's ID (a UUID), not its org_ name")

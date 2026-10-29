@@ -32,7 +32,7 @@ func TestLoadDefaults(t *testing.T) {
 func TestLoadRefuses(t *testing.T) {
 	const p = "project: 7a1b2c3d-0000-4000-8000-000000000003\n"
 	for body, want := range map[string]string{
-		"project: my-project\n":                                            "project must be the project's ID (prj_… or a UUID)",
+		"project: prj_abc\n":                                               "project must be the project's ID (a UUID), not its prj_ name",
 		p + "organization: org_x\n":                                        "organization must be the organization's ID (a UUID), not its org_ name",
 		p + "projet: typo\n":                                               "projet",
 		p + "credentials: {source: ssh}\n":                                 "source",
@@ -47,7 +47,7 @@ func TestLoadRefuses(t *testing.T) {
 
 // On an EZGH instance the agent learns its project from the metadata service.
 func TestConfigProjectOptionalWithMetadata(t *testing.T) {
-	for _, body := range []string{"credentials:\n  source: metadata\n", "credentials:\n  source: auto\n", "stateDir: /tmp/x\n", "project: prj_mtgr29er0q1k\n"} {
+	for _, body := range []string{"credentials:\n  source: metadata\n", "credentials:\n  source: auto\n", "stateDir: /tmp/x\n"} {
 		if _, err := load(t, body); err != nil {
 			t.Errorf("%q: %v", body, err)
 		}

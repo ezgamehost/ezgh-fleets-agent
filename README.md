@@ -48,7 +48,8 @@ credentials:
 elsewhere. With `auto` or `metadata`, `project` may be left out: the agent then registers in the
 instance's own project, which the metadata service names (`GET /ezgh/v1/instance`). With neither
 a `project` nor an answering metadata service it refuses to start (`project is required (or run
-on an EZGH instance)`); with `file` or `oidc` credentials `project` is always required. The agent keeps its node binding in `/var/lib/ezgh-fleets-agent` (0700).
+on an EZGH instance)`); with `file` or `oidc` credentials `project` is always required. The agent keeps its node binding in
+`/var/lib/ezgh-fleets-agent` (0700).
 
 ## Development
 
