@@ -32,6 +32,9 @@ var (
 	projectID = regexp.MustCompile(`^prj_[a-z0-9]{12}$`)
 )
 
+// IsUUID reports whether s is a UUID.
+func IsUUID(s string) bool { return uuid.MatchString(s) }
+
 // ErrNoProject: no project in the config, and no metadata service to ask.
 var ErrNoProject = errors.New("project is required (or run on an EZGH instance)")
 

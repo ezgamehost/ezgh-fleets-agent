@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/config"
 )
 
 const (
@@ -27,6 +29,10 @@ const (
 // NoBotRetry is how long the agent waits before asking again when the instance has no Bot, so
 // attaching one later is enough.
 const NoBotRetry = 3 * time.Minute
+
+// ErrNoProjectID means the instance document names the project only by its prj_ ID, from a host
+// that doesn't send projectId yet: fleets-api's paths need the UUID.
+var ErrNoProjectID = errors.New("fleets-api needs the project's UUID, and the instance metadata gives only its prj_ ID (no projectId yet): set project in the config, or wait for the host to send projectId")
 
 // ErrNoBot means the instance has no Bot attached.
 var ErrNoBot = errors.New("this instance has no Bot attached")
@@ -106,8 +112,8 @@ func (p *Metadata) Credentials(ctx context.Context) (key, bot string, err error)
 	return "", "", err
 }
 
-// Project is the instance's project from GET /ezgh/v1/instance: its prj_ ID (an older
-// instance's may be a UUID). Read once per process: it can't change.
+// Project is the instance's project UUID from GET /ezgh/v1/instance: projectId, else project
+// when that's a UUID (older definitions), else ErrNoProjectID. Kept once read: it can't change.
 func (p *Metadata) Project(ctx context.Context) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -122,12 +128,20 @@ func (p *Metadata) Project(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("instance metadata answered %d", status)
 	}
 	var doc struct {
-		Project string `json:"project"`
+		Project   string `json:"project"`
+		ProjectID string `json:"projectId"`
 	}
-	if err := json.Unmarshal(body, &doc); err != nil || doc.Project == "" {
+	if err := json.Unmarshal(body, &doc); err != nil || doc.Project == "" && doc.ProjectID == "" || doc.ProjectID != "" && !config.IsUUID(doc.ProjectID) {
 		return "", errors.New("instance metadata sent an unreadable answer")
 	}
-	p.project = doc.Project
+	switch {
+	case doc.ProjectID != "":
+		p.project = doc.ProjectID
+	case config.IsUUID(doc.Project):
+		p.project = doc.Project
+	default:
+		return "", fmt.Errorf("%w (project %s)", ErrNoProjectID, doc.Project)
+	}
 	return p.project, nil
 }
 

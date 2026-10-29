@@ -218,9 +218,10 @@ func TestResetRegistersAgain(t *testing.T) {
 }
 
 // With no project in the config, the agent registers in the instance's project, from the metadata
-// service; off an EZGH instance it refuses to start.
+// service's projectId (the UUID fleets-api needs); off an EZGH instance it refuses to start.
 func TestRegisterUsesMetadataProject(t *testing.T) {
 	var instanceReads atomic.Int32
+	var slugOnly atomic.Bool
 	md := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/ezgh/v1/token":
@@ -229,19 +230,24 @@ func TestRegisterUsesMetadataProject(t *testing.T) {
 			_, _ = io.WriteString(w, `{"apiKey":"ezgh_key","expiresAt":"2999-01-01T00:00:00Z","bot":"bot_x"}`)
 		case "/ezgh/v1/instance":
 			instanceReads.Add(1)
-			_, _ = io.WriteString(w, `{"id":"ins_a","name":"web-1","type":"g1.small","project":"prj_mtgr29er0q1k","region":"us-west-1","interfaces":[]}`)
+			if slugOnly.Swap(false) { // a host without the projectId field yet
+				_, _ = io.WriteString(w, `{"id":"ins_a","project":"prj_mtgr29er0q1k","interfaces":[]}`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"id":"ins_a","name":"web-1","type":"g1.small","project":"prj_mtgr29er0q1k","projectId":"7a1b2c3d-0000-4000-8000-000000000003","region":"us-west-1","interfaces":[]}`)
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	defer md.Close()
-	var path string
+	var paths []string
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path = r.URL.Path
+		paths = append(paths, r.URL.Path)
 		w.WriteHeader(http.StatusCreated)
 		_, _ = io.WriteString(w, `{"id":"0b6c3d1e-0000-4000-8000-000000000002","slug":"nod_abc"}`)
 	}))
 	defer api.Close()
+	const want = "/projects/7a1b2c3d-0000-4000-8000-000000000003/"
 	r, _, _ := newRegistrar(t, api.URL)
 	r.Config.Project, r.Config.Organization = "", "6f0c1a2b-0000-4000-8000-000000000001"
 	r.Creds = &creds.Metadata{Endpoint: md.URL}
@@ -249,14 +255,31 @@ func TestRegisterUsesMetadataProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(path, "/projects/prj_mtgr29er0q1k/") || id.Node.ProjectID != "prj_mtgr29er0q1k" {
-		t.Fatalf("registered at %s, node %+v", path, id.Node)
+	if len(paths) != 1 || !strings.Contains(paths[0], want) || id.Node.ProjectID != "7a1b2c3d-0000-4000-8000-000000000003" {
+		t.Fatalf("registered at %v, node %+v", paths, id.Node)
 	}
 	if err := r.Reset(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.Ensure(context.Background()); err != nil || instanceReads.Load() != 1 {
 		t.Fatalf("again: %v, %d instance reads (want 1: it can't change)", err, instanceReads.Load())
+	}
+
+	// Only a prj_ project: refused (fleets-api needs the UUID), logged once, asked again on the
+	// refusal cadence until the metadata service gives projectId.
+	slugOnly.Store(true)
+	paths = nil
+	r, sleeps, logs := newRegistrar(t, api.URL)
+	r.Config.Project, r.Config.Organization = "", "6f0c1a2b-0000-4000-8000-000000000001"
+	r.Creds = &creds.Metadata{Endpoint: md.URL}
+	if _, err := r.Ensure(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(*sleeps) != 1 || (*sleeps)[0] != refusedRetry || strings.Count(logs.String(), "needs the project's UUID") != 1 {
+		t.Fatalf("waits %v, logs: %s", *sleeps, logs)
+	}
+	if len(paths) != 1 || !strings.Contains(paths[0], want) {
+		t.Fatalf("registered at %v", paths)
 	}
 
 	for name, src := range map[string]creds.Source{"not an instance": staticKey("ezgh_key"), "metadata unreachable": &creds.Metadata{Endpoint: "http://127.0.0.1:1"}} {

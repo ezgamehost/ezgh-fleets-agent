@@ -117,15 +117,24 @@ func (r *Registrar) Ensure(ctx context.Context) (*Identity, error) {
 	default:
 		return nil, fmt.Errorf("reading %s: %w", NodeFile, err)
 	}
-	project, err := r.project(ctx)
-	if err != nil {
-		return nil, err
-	}
+	warned := false
 	for {
-		wait, err := r.attempt(ctx, &id, project)
-		if err == nil {
-			r.Log.Info("registered", "node", id.Node.Slug)
-			return &id, nil
+		project, err := r.project(ctx)
+		var wait time.Duration
+		switch {
+		case errors.Is(err, creds.ErrNoProjectID): // the host may not send projectId yet
+			if !warned {
+				r.Log.Error("can't register yet", "err", err, "retryIn", refusedRetry)
+				warned = true
+			}
+			wait = refusedRetry
+		case err != nil:
+			return nil, err
+		default:
+			if wait, err = r.attempt(ctx, &id, project); err == nil {
+				r.Log.Info("registered", "node", id.Node.Slug)
+				return &id, nil
+			}
 		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -155,10 +164,10 @@ func (r *Registrar) project(ctx context.Context) (string, error) {
 		return "", config.ErrNoProject
 	}
 	p, err := m.Project(ctx)
-	if err != nil {
+	if err != nil && !errors.Is(err, creds.ErrNoProjectID) {
 		return "", fmt.Errorf("%w: %w", config.ErrNoProject, err)
 	}
-	return p, nil
+	return p, err
 }
 
 // fresh stores a new, unregistered identity: a new binding key seed and idempotency key.
