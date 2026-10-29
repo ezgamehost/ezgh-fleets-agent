@@ -25,12 +25,20 @@ const (
 	SourceOIDC     = "oidc"
 )
 
-// fleets-api takes IDs in its paths, not prj_/org_ names.
-var uuid = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+// fleets-api takes IDs in its paths, not org_ names. A project is its UUID or its prj_ ID, as
+// the metadata service names it.
+var (
+	uuid      = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	projectID = regexp.MustCompile(`^prj_[a-z0-9]{12}$`)
+)
+
+// ErrNoProject: no project in the config, and no metadata service to ask.
+var ErrNoProject = errors.New("project is required (or run on an EZGH instance)")
 
 type Config struct {
-	// Organization (optional: the agent asks org-api which one its key belongs to) and Project
-	// are IDs (UUIDs).
+	// Organization (optional: the agent asks org-api which one its key belongs to) is a UUID.
+	// Project is a prj_ ID or a UUID; optional on an EZGH instance (credentials auto or
+	// metadata), where the metadata service names it.
 	Organization string      `yaml:"organization"`
 	Project      string      `yaml:"project"`
 	Credentials  Credentials `yaml:"credentials"`
@@ -73,11 +81,8 @@ func Load(path string) (*Config, error) {
 }
 
 func (c *Config) check() error {
-	if c.Project == "" {
-		return errors.New("project is required")
-	}
-	if !uuid.MatchString(c.Project) {
-		return errors.New("project must be the project's ID (a UUID), not its prj_ name")
+	if c.Project != "" && !projectID.MatchString(c.Project) && !uuid.MatchString(c.Project) {
+		return errors.New("project must be the project's ID (prj_… or a UUID)")
 	}
 	if c.Organization != "" && !uuid.MatchString(c.Organization) {
 		return errors.New("organization must be the organization's ID (a UUID), not its org_ name")
@@ -94,6 +99,9 @@ func (c *Config) check() error {
 	def(&c.StateDir, DefaultStateDir)
 	def(&c.Credentials.Source, SourceAuto)
 	def(&c.Credentials.File, DefaultCredentialsFile)
+	if c.Project == "" && (c.Credentials.Source == SourceFile || c.Credentials.Source == SourceOIDC) {
+		return ErrNoProject
+	}
 	switch c.Credentials.Source {
 	case SourceAuto, SourceMetadata, SourceFile:
 	case SourceOIDC:

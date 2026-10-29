@@ -36,7 +36,7 @@ ezgamehost/ezgh-fleets-agent`).
 `/etc/ezgh-fleets-agent/config.yaml`:
 
 ```yaml
-project: 7a1b2c3d-…         # required: the project's ID (a UUID), not its prj_ name
+project: 7a1b2c3d-…         # the project's ID (a UUID); optional on an EZGH instance
 organization: 6f0c1a2b-…    # optional (its ID): learned from the bot key
 credentials:
   source: auto            # auto | metadata | file | oidc
@@ -45,7 +45,10 @@ credentials:
 ```
 
 `auto` uses the instance metadata service on an EZGH compute instance, and the key file
-elsewhere. The agent keeps its node binding in `/var/lib/ezgh-fleets-agent` (0700).
+elsewhere. With `auto` or `metadata`, `project` may be left out: the agent then registers in the
+instance's own project, which the metadata service names (`GET /ezgh/v1/instance`). With neither
+a `project` nor an answering metadata service it refuses to start (`project is required (or run
+on an EZGH instance)`); with `file` or `oidc` credentials `project` is always required. The agent keeps its node binding in `/var/lib/ezgh-fleets-agent` (0700).
 
 ## Development
 

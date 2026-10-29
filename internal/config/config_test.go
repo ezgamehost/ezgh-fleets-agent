@@ -32,8 +32,7 @@ func TestLoadDefaults(t *testing.T) {
 func TestLoadRefuses(t *testing.T) {
 	const p = "project: 7a1b2c3d-0000-4000-8000-000000000003\n"
 	for body, want := range map[string]string{
-		"organization: org_x\n":                                            "project",
-		"project: prj_abc\n":                                               "project must be the project's ID (a UUID), not its prj_ name",
+		"project: my-project\n":                                            "project must be the project's ID (prj_… or a UUID)",
 		p + "organization: org_x\n":                                        "organization must be the organization's ID (a UUID), not its org_ name",
 		p + "projet: typo\n":                                               "projet",
 		p + "credentials: {source: ssh}\n":                                 "source",
@@ -42,6 +41,23 @@ func TestLoadRefuses(t *testing.T) {
 	} {
 		if _, err := load(t, body); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: err = %v, want it to mention %q", body, err, want)
+		}
+	}
+}
+
+// On an EZGH instance the agent learns its project from the metadata service.
+func TestConfigProjectOptionalWithMetadata(t *testing.T) {
+	for _, body := range []string{"credentials:\n  source: metadata\n", "credentials:\n  source: auto\n", "stateDir: /tmp/x\n", "project: prj_mtgr29er0q1k\n"} {
+		if _, err := load(t, body); err != nil {
+			t.Errorf("%q: %v", body, err)
+		}
+	}
+}
+
+func TestConfigProjectRequiredWithoutMetadata(t *testing.T) {
+	for _, body := range []string{"credentials:\n  source: file\n", "organization: 6f0c1a2b-0000-4000-8000-000000000001\ncredentials: {source: oidc, oidc: {bot: b, tokenFile: /t}}\n"} {
+		if _, err := load(t, body); err == nil || !strings.Contains(err.Error(), "project is required (or run on an EZGH instance)") {
+			t.Errorf("%q: err = %v", body, err)
 		}
 	}
 }

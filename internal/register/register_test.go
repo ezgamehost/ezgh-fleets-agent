@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/ezgamehost/ezgh-fleets-agent/internal/config"
+	"github.com/ezgamehost/ezgh-fleets-agent/internal/creds"
 	"github.com/ezgamehost/ezgh-fleets-agent/internal/state"
 )
 
@@ -213,5 +214,56 @@ func TestResetRegistersAgain(t *testing.T) {
 	}
 	if len(api.bodies) != 2 || api.bodies[1]["publicKey"] == api.bodies[0]["publicKey"] {
 		t.Fatalf("registrations %v, want a second one with a new key", api.bodies)
+	}
+}
+
+// With no project in the config, the agent registers in the instance's project, from the metadata
+// service; off an EZGH instance it refuses to start.
+func TestRegisterUsesMetadataProject(t *testing.T) {
+	var instanceReads atomic.Int32
+	md := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/ezgh/v1/token":
+			_, _ = io.WriteString(w, "tok")
+		case "/ezgh/v1/credentials":
+			_, _ = io.WriteString(w, `{"apiKey":"ezgh_key","expiresAt":"2999-01-01T00:00:00Z","bot":"bot_x"}`)
+		case "/ezgh/v1/instance":
+			instanceReads.Add(1)
+			_, _ = io.WriteString(w, `{"id":"ins_a","name":"web-1","type":"g1.small","project":"prj_mtgr29er0q1k","region":"us-west-1","interfaces":[]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer md.Close()
+	var path string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"id":"0b6c3d1e-0000-4000-8000-000000000002","slug":"nod_abc"}`)
+	}))
+	defer api.Close()
+	r, _, _ := newRegistrar(t, api.URL)
+	r.Config.Project, r.Config.Organization = "", "6f0c1a2b-0000-4000-8000-000000000001"
+	r.Creds = &creds.Metadata{Endpoint: md.URL}
+	id, err := r.Ensure(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(path, "/projects/prj_mtgr29er0q1k/") || id.Node.ProjectID != "prj_mtgr29er0q1k" {
+		t.Fatalf("registered at %s, node %+v", path, id.Node)
+	}
+	if err := r.Reset(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Ensure(context.Background()); err != nil || instanceReads.Load() != 1 {
+		t.Fatalf("again: %v, %d instance reads (want 1: it can't change)", err, instanceReads.Load())
+	}
+
+	for name, src := range map[string]creds.Source{"not an instance": staticKey("ezgh_key"), "metadata unreachable": &creds.Metadata{Endpoint: "http://127.0.0.1:1"}} {
+		r, _, _ := newRegistrar(t, api.URL)
+		r.Config.Project, r.Creds = "", src
+		if _, err := r.Ensure(context.Background()); err == nil || !strings.Contains(err.Error(), "project is required (or run on an EZGH instance)") {
+			t.Errorf("%s: err = %v", name, err)
+		}
 	}
 }

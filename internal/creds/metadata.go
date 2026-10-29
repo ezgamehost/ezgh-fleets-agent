@@ -48,6 +48,7 @@ type Metadata struct {
 	nextTry   time.Time
 	lastErr   error
 	retry     time.Duration // the metadata service's Retry-After (503, 429) on the last answer
+	project   string
 }
 
 // Available reports whether this machine is an EZGH compute instance. No network is touched.
@@ -103,6 +104,31 @@ func (p *Metadata) Credentials(ctx context.Context) (key, bot string, err error)
 		}
 	}
 	return "", "", err
+}
+
+// Project is the instance's project from GET /ezgh/v1/instance: its prj_ ID (an older
+// instance's may be a UUID). Read once per process: it can't change.
+func (p *Metadata) Project(ctx context.Context) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.project != "" {
+		return p.project, nil
+	}
+	status, body, err := p.do(ctx, http.MethodGet, "/ezgh/v1/instance", nil)
+	if err != nil {
+		return "", err
+	}
+	if status != http.StatusOK {
+		return "", fmt.Errorf("instance metadata answered %d", status)
+	}
+	var doc struct {
+		Project string `json:"project"`
+	}
+	if err := json.Unmarshal(body, &doc); err != nil || doc.Project == "" {
+		return "", errors.New("instance metadata sent an unreadable answer")
+	}
+	p.project = doc.Project
+	return p.project, nil
 }
 
 // Invalidate drops the cached key if it is the one an API refused, so the next Key refetches.

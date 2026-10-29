@@ -117,8 +117,12 @@ func (r *Registrar) Ensure(ctx context.Context) (*Identity, error) {
 	default:
 		return nil, fmt.Errorf("reading %s: %w", NodeFile, err)
 	}
+	project, err := r.project(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for {
-		wait, err := r.attempt(ctx, &id)
+		wait, err := r.attempt(ctx, &id, project)
 		if err == nil {
 			r.Log.Info("registered", "node", id.Node.Slug)
 			return &id, nil
@@ -139,6 +143,24 @@ func (r *Registrar) Reset() error {
 	return err
 }
 
+// project is the configured project, else the instance's from the metadata service.
+func (r *Registrar) project(ctx context.Context) (string, error) {
+	if r.Config.Project != "" {
+		return r.Config.Project, nil
+	}
+	m, ok := r.Creds.(interface {
+		Project(context.Context) (string, error)
+	})
+	if !ok {
+		return "", config.ErrNoProject
+	}
+	p, err := m.Project(ctx)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", config.ErrNoProject, err)
+	}
+	return p, nil
+}
+
 // fresh stores a new, unregistered identity: a new binding key seed and idempotency key.
 func (r *Registrar) fresh() (Identity, error) {
 	seed := make([]byte, ed25519.SeedSize)
@@ -150,7 +172,7 @@ func (r *Registrar) fresh() (Identity, error) {
 }
 
 // attempt registers once; on failure it says how long to wait.
-func (r *Registrar) attempt(ctx context.Context, id *Identity) (time.Duration, error) {
+func (r *Registrar) attempt(ctx context.Context, id *Identity, project string) (time.Duration, error) {
 	key, err := r.Creds.Key(ctx)
 	if err != nil {
 		wait := transientRetry
@@ -174,7 +196,7 @@ func (r *Registrar) attempt(ctx context.Context, id *Identity) (time.Duration, e
 		"arch":         r.Facts.Arch,
 		"agentVersion": r.Facts.AgentVersion,
 	})
-	u := strings.TrimRight(r.Config.APIURL, "/") + "/v1/organizations/" + url.PathEscape(org) + "/projects/" + url.PathEscape(r.Config.Project) + "/nodes/register"
+	u := strings.TrimRight(r.Config.APIURL, "/") + "/v1/organizations/" + url.PathEscape(org) + "/projects/" + url.PathEscape(project) + "/nodes/register"
 	status, rb, retryAfter, err := r.do(ctx, http.MethodPost, u, key, id.IdempotencyKey, body)
 	if err != nil {
 		r.Log.Warn("registration failed", "err", err)
@@ -190,7 +212,7 @@ func (r *Registrar) attempt(ctx context.Context, id *Identity) (time.Duration, e
 			n.OrganizationID = org
 		}
 		if n.ProjectID == "" {
-			n.ProjectID = r.Config.Project
+			n.ProjectID = project
 		}
 		id.Node, id.RegisteredAt = &n, time.Now().UTC()
 		return 0, r.State.Write(NodeFile, id)
