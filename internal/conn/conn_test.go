@@ -375,6 +375,47 @@ func TestReconnectBackoff(t *testing.T) {
 	}
 }
 
+// A gateway that is draining closes with 4012 before the welcome: the agent backs off rather
+// than redialing in a loop. After the welcome, 4012 reconnects at once, but not twice in a row.
+func TestReconnectBeforeWelcomeBacksOff(t *testing.T) {
+	f := newFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	waits := func(want time.Duration) {
+		t.Helper()
+		f.disconnected()
+		if err := f.clock.BlockUntilContext(ctx, 1); err != nil {
+			t.Fatal(err)
+		}
+		f.clock.Advance(want - time.Millisecond)
+		select {
+		case <-f.conns:
+			t.Fatalf("reconnected before %s", want)
+		case <-time.After(50 * time.Millisecond):
+		}
+		f.clock.Advance(time.Millisecond)
+	}
+
+	g := f.accept()
+	_ = g.ws.Close(CloseReconnect, "draining") // before the challenge
+	waits(750 * time.Millisecond)
+	g = f.accept()
+	f.challenge(g)
+	_ = g.ws.Close(CloseReconnect, "draining") // after the hello: where the gateway drains
+	waits(1500 * time.Millisecond)             // growing, as no welcome came
+	g = f.accept()
+
+	f.handshake(g, t0)
+	f.connected()
+	_ = g.ws.Close(CloseReconnect, "retry")
+	g = f.accept() // the first 4012 after the welcome: at once
+	f.handshake(g, t0)
+	f.connected()
+	_ = g.ws.Close(CloseReconnect, "retry")
+	waits(750 * time.Millisecond) // the second in a row backs off, from the start again
+	f.accept()
+}
+
 type testWriter struct{ t *testing.T }
 
 func (w testWriter) Write(p []byte) (int, error) {

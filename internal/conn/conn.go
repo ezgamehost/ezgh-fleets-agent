@@ -108,6 +108,7 @@ func (c *Conn) Run(ctx context.Context) error {
 		c.Rand = rand.Float64
 	}
 	attempt := 0
+	quick := false // the last reconnect was the immediate one a 4012 gets
 	for {
 		welcomed, retryAfter, err := c.connect(ctx)
 		if ctx.Err() != nil {
@@ -121,10 +122,13 @@ func (c *Conn) Run(ctx context.Context) error {
 			attempt = 0
 		}
 		c.setStatus(func(s *Status) { s.Connected, s.Since, s.LastError = false, c.Clock.Now(), errString(err) })
-		if websocket.CloseStatus(err) == CloseReconnect || errors.Is(err, errReconnect) {
+		// A 4012 before the welcome (a draining gateway) or twice in a row backs off.
+		if welcomed && !quick && (websocket.CloseStatus(err) == CloseReconnect || errors.Is(err, errReconnect)) {
 			c.Log.Info("gateway asked to reconnect")
+			quick = true
 			continue
 		}
+		quick = false
 		wait := max(Backoff(attempt, c.Rand()), retryAfter)
 		attempt++
 		c.Log.Warn("gateway connection lost", "err", err, "retryIn", wait.Round(time.Millisecond))
