@@ -413,6 +413,22 @@ func TestReconnectBeforeWelcomeBacksOff(t *testing.T) {
 	f.connected()
 	_ = g.ws.Close(CloseReconnect, "retry")
 	waits(750 * time.Millisecond) // the second in a row backs off, from the start again
+	g = f.accept()
+
+	// A session that lasted BackoffMax makes its 4012 a fresh drain (the next rollout): at once.
+	f.handshake(g, t0)
+	f.connected()
+	_ = g.ws.Close(CloseReconnect, "draining")
+	g = f.accept()
+	f.handshake(g, t0)
+	f.connected()
+	f.clock.Advance(BackoffMax)
+	_ = g.ws.Close(CloseReconnect, "draining")
+	g = f.accept()
+	f.handshake(g, t0)
+	f.connected()
+	_ = g.ws.Close(CloseReconnect, "retry")
+	waits(750 * time.Millisecond)
 	f.accept()
 }
 

@@ -120,9 +120,14 @@ func (c *Conn) Run(ctx context.Context) error {
 		}
 		if welcomed {
 			attempt = 0
+			c.mu.Lock()
+			if c.Clock.Since(c.status.Since) >= BackoffMax { // Since is the welcome: a long session's 4012 is a fresh drain
+				quick = false
+			}
+			c.mu.Unlock()
 		}
 		c.setStatus(func(s *Status) { s.Connected, s.Since, s.LastError = false, c.Clock.Now(), errString(err) })
-		// A 4012 before the welcome (a draining gateway) or twice in a row backs off.
+		// A 4012 before the welcome (a draining gateway) or twice in a row within BackoffMax backs off.
 		if welcomed && !quick && (websocket.CloseStatus(err) == CloseReconnect || errors.Is(err, errReconnect)) {
 			c.Log.Info("gateway asked to reconnect")
 			quick = true
