@@ -324,3 +324,34 @@ func TestResendAfterDeadlineReportedNotRerun(t *testing.T) {
 		t.Fatalf("stale re-send: %v, want expired", err)
 	}
 }
+
+// Every reconnect forgets reported records past their forgetAfter, not only a restart: a
+// long-running agent's state directory doesn't grow without end.
+func TestResendForgetsOldRecords(t *testing.T) {
+	f := newFixture(t)
+	now := f.clock.Now()
+	res := &protocol.InvocationResult{T: protocol.TypeInvocationResult, RunID: "c", Status: StatusSucceeded}
+	for _, rec := range []record{
+		{ID: "a", StartedAt: &now, Result: res, Reported: true, ForgetAfter: now.Add(-time.Hour)},
+		{ID: "b", StartedAt: &now, Result: res, Reported: true, ForgetAfter: now.Add(time.Hour)},
+		{ID: "c", StartedAt: &now, Result: res, ForgetAfter: now.Add(-time.Hour)},
+	} {
+		if err := f.r.Dir.Write(file(rec.ID), &rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.r.Resend()
+	if _, err := os.Stat(filepath.Join(f.r.Dir.Path, file("a"))); !os.IsNotExist(err) {
+		t.Fatalf("inv-a.json kept past forgetAfter: %v", err)
+	}
+	var rec record
+	if err := f.r.Dir.Read(file("b"), &rec); err != nil {
+		t.Fatalf("inv-b.json: %v", err)
+	}
+	if r := f.result(); r.RunID != "c" {
+		t.Fatalf("resent %+v, want c", r)
+	}
+	if err := f.r.Dir.Read(file("c"), &rec); err != nil || !rec.Reported {
+		t.Fatalf("inv-c.json: %+v (%v), want kept and reported", rec, err)
+	}
+}

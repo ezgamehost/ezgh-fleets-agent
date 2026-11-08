@@ -113,18 +113,37 @@ func (r *Runner) Recover() error {
 	return nil
 }
 
-// Resend sends every result not yet reported. Run after each (re)connect.
+// Resend sends every result not yet reported, and forgets reported records past their
+// forgetAfter. Run after each (re)connect.
 func (r *Runner) Resend() {
 	ents, err := os.ReadDir(r.Dir.Path)
 	if err != nil {
 		return
 	}
+	now := r.Clock.Now()
 	for _, e := range ents {
 		var rec record
-		if !strings.HasPrefix(e.Name(), "inv-") || r.Dir.Read(e.Name(), &rec) != nil || rec.Result == nil || rec.Reported {
+		if !strings.HasPrefix(e.Name(), "inv-") || r.Dir.Read(e.Name(), &rec) != nil || rec.Result == nil {
+			continue
+		}
+		if rec.Reported {
+			if now.After(rec.ForgetAfter) {
+				r.forget(e.Name(), now)
+			}
 			continue
 		}
 		r.report(&rec)
+	}
+}
+
+// forget removes a record only if, read again under r.mu, it is still reported and past its
+// forgetAfter: Run may have extended it (or marked it unreported) since Resend read it.
+func (r *Runner) forget(name string, now time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var rec record
+	if r.Dir.Read(name, &rec) == nil && rec.Reported && now.After(rec.ForgetAfter) {
+		_ = r.Dir.Remove(name)
 	}
 }
 
