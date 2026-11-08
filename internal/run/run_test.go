@@ -355,3 +355,27 @@ func TestResendForgetsOldRecords(t *testing.T) {
 		t.Fatalf("inv-c.json: %+v (%v), want kept and reported", rec, err)
 	}
 }
+
+// forget re-reads the record under r.mu: Run may have extended forgetAfter or marked it
+// unreported since Resend read it, and then the record must stay.
+func TestForgetRechecksRecord(t *testing.T) {
+	f := newFixture(t)
+	now := f.clock.Now()
+	staleNow := now.Add(time.Minute)
+	res := &protocol.InvocationResult{T: protocol.TypeInvocationResult, RunID: "x", Status: StatusSucceeded}
+	for _, tc := range []struct {
+		id  string
+		rec record // what Run rewrote after Resend read the expired, reported record
+	}{
+		{"extended", record{ID: "extended", StartedAt: &now, Result: res, Reported: true, ForgetAfter: staleNow.Add(time.Hour)}},
+		{"unreported", record{ID: "unreported", StartedAt: &now, Result: res, Reported: false, ForgetAfter: now}},
+	} {
+		if err := f.r.Dir.Write(file(tc.id), &tc.rec); err != nil {
+			t.Fatal(err)
+		}
+		f.r.forget(file(tc.id), staleNow)
+		if _, err := os.Stat(filepath.Join(f.r.Dir.Path, file(tc.id))); err != nil {
+			t.Fatalf("%s: record removed despite the re-check: %v", tc.id, err)
+		}
+	}
+}
